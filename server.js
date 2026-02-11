@@ -12,6 +12,7 @@ const {
   FRUITVALE_GATE_ISSUES,
   FRUITVALE_GENERAL_HELP
 } = require('./knowledge-base');
+const { COMPANY_KNOWLEDGE } = require('./company-knowledge');
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -50,7 +51,7 @@ const ALL_SOPS = [
   FRUITVALE_ELECTRIC_FENCE_SOP,
   FRUITVALE_ACCESS_CONTROL_INFO,
   FRUITVALE_GATE_ISSUES,
-  FRUITVALE_GENERAL_HELP  // This one catches "I don't know what to do"
+  FRUITVALE_GENERAL_HELP
 ];
 
 // Detect which SOP is needed
@@ -219,13 +220,33 @@ async function handleConversation(guardPhone, message) {
       await sendSMS(guardPhone, firstStep.userFriendly, imageUrl);
       return null;
     } else {
-      // General question - use Claude AI
+      // General question - use Claude AI with company knowledge
       try {
+        const systemPrompt = `You are WatchTower, a helpful SMS assistant for Manzanita Security guards.
+
+${COMPANY_KNOWLEDGE}
+
+RESPONSE RULES:
+- Keep responses SHORT (2-3 sentences max)
+- Be DIRECTIVE ("Do this" not "You might want to...")
+- Use the company knowledge above to give accurate answers
+- If you find info in the knowledge base, use it
+- If you don't know, say "Contact Emma (510-612-4813) or Chris (925-922-1067) about that"
+- Sound like a calm supervisor, not a chatbot
+- No bullet points unless listing contact numbers
+- Be professional but friendly
+
+Example good response:
+"Payday is every Friday. You'll get direct deposit or can pick up at the office. Questions? Call Emma at 510-612-4813."
+
+Example bad response:
+"According to company policy, employees are compensated on a weekly basis each Friday via direct deposit or alternative methods as elected by the employee..."`;
+
         const response = await anthropic.messages.create({
           model: 'claude-sonnet-4-20250514',
-          max_tokens: 500,
+          max_tokens: 300,
           messages: [{ role: 'user', content: message }],
-          system: 'You are WatchTower, a helpful SMS assistant for security guards at Fruitvale. Keep responses SHORT (2-3 sentences max), directive, and helpful. Sound like a calm supervisor, not a chatbot. If you don\'t know, say "Text your supervisor about that."'
+          system: systemPrompt
         });
         
         return response.content[0].text;
@@ -320,18 +341,20 @@ app.post('/sms', async (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'WatchTower is running!', 
-    version: '2.0',
+    version: '2.1',
     activeConversations: conversationState.size,
-    availableSOPs: ALL_SOPS.length
+    availableSOPs: ALL_SOPS.length,
+    companyKnowledge: 'Loaded'
   });
 });
 
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`\n🗼 WatchTower v2.0 is running on port ${PORT}`);
+  console.log(`\n🗼 WatchTower v2.1 is running on port ${PORT}`);
   console.log(`📱 Webhook URL: ${CONFIG.SERVER_URL}/sms`);
   console.log(`📚 Available SOPs: ${ALL_SOPS.length}`);
+  console.log(`📖 Company Handbook: Loaded`);
   console.log(`\n--- SOPs Loaded ---`);
   ALL_SOPS.forEach(sop => console.log(`   ✓ ${sop.title}`));
   console.log(`-------------------\n`);
