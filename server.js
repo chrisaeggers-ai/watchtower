@@ -8,7 +8,9 @@ const {
   FRUITVALE_NVR_SOP,
   FRUITVALE_FIRE_PANEL_SOP,
   FRUITVALE_ELECTRIC_FENCE_SOP,
-  FRUITVALE_ACCESS_CONTROL_INFO
+  FRUITVALE_ACCESS_CONTROL_INFO,
+  FRUITVALE_GATE_ISSUES,
+  FRUITVALE_GENERAL_HELP
 } = require('./knowledge-base');
 
 const app = express();
@@ -46,7 +48,9 @@ const ALL_SOPS = [
   FRUITVALE_NVR_SOP,
   FRUITVALE_FIRE_PANEL_SOP,
   FRUITVALE_ELECTRIC_FENCE_SOP,
-  FRUITVALE_ACCESS_CONTROL_INFO
+  FRUITVALE_ACCESS_CONTROL_INFO,
+  FRUITVALE_GATE_ISSUES,
+  FRUITVALE_GENERAL_HELP  // This one catches "I don't know what to do"
 ];
 
 // Detect which SOP is needed
@@ -66,18 +70,41 @@ function detectSOP(message) {
   return null;
 }
 
-// Check for confirmation
+// Check for confirmation - expanded to catch more variations
 function isConfirmation(message) {
-  const confirmPhrases = ['done', 'yes', 'yeah', 'yep', 'ok', 'okay', 'ready', 'good', 'got it', 'finished', 'complete', 'there', 'im there', "i'm there", 'inside', 'all set', 'set'];
+  const confirmPhrases = [
+    'done', 'yes', 'yeah', 'yep', 'yup', 'ok', 'okay', 'k', 
+    'ready', 'good', 'got it', 'finished', 'complete', 
+    'there', 'im there', "i'm there", 'inside', 'all set', 
+    'set', 'in', "i'm in", 'im in', 'connected', 'see it',
+    'see them', 'yea', 'ye', 'ya', 'sure', 'correct', 'right',
+    '👍', '✅', '✓'
+  ];
   const lowerMessage = message.toLowerCase().trim();
   return confirmPhrases.some(phrase => lowerMessage.includes(phrase));
 }
 
 // Check if confused
 function isConfused(message) {
-  const confusedPhrases = ['idk', "i don't know", 'confused', 'what', 'huh', 'dont understand', "don't understand", 'help', 'stuck', 'lost', 'unclear'];
+  const confusedPhrases = [
+    'idk', "i don't know", 'confused', 'what', 'huh', 
+    'dont understand', "don't understand", 'help', 'stuck', 
+    'lost', 'unclear', 'not sure', "i'm lost", "i'm stuck",
+    'unsure', "i'm confused", 'wtf', 'where', '?'
+  ];
   const lowerMessage = message.toLowerCase().trim();
   return confusedPhrases.some(phrase => lowerMessage.includes(phrase));
+}
+
+// Check if asking for supervisor/escalation
+function isEscalationRequest(message) {
+  const escalationPhrases = [
+    'supervisor', 'manager', 'boss', 'escalate', 
+    'need help', 'call someone', 'get someone',
+    'i need someone', 'someone help', 'can someone help'
+  ];
+  const lowerMessage = message.toLowerCase().trim();
+  return escalationPhrases.some(phrase => lowerMessage.includes(phrase));
 }
 
 // Send SMS/MMS
@@ -138,16 +165,17 @@ async function sendEmailReport(guardPhone, issue, resolved, steps) {
 }
 
 // Escalate to supervisor
-async function escalateToSupervisor(guardPhone, issue, currentStep) {
-  const escalationMessage = `🚨 Guard at ${guardPhone} needs help with: ${issue}\n\nThey're stuck at Step ${currentStep}. Please contact them ASAP.`;
+async function escalateToSupervisor(guardPhone, issue, currentStep, additionalContext = '') {
+  const contextInfo = additionalContext ? `\n\nContext: ${additionalContext}` : '';
+  const escalationMessage = `🚨 Guard at ${guardPhone} needs help with: ${issue}\n\nThey're stuck at Step ${currentStep}.${contextInfo}\n\nPlease contact them ASAP.`;
   
   await sendSMS(CONFIG.SUPERVISOR_PHONE, escalationMessage);
-  await sendSMS(guardPhone, "I'm connecting you with your supervisor who will help you directly. They'll reach out shortly.");
+  await sendSMS(guardPhone, "Connecting you with your supervisor. They'll reach out shortly.");
   
   const state = conversationState.get(guardPhone);
   await sendEmailReport(guardPhone, issue, false, state.completedSteps || []);
   
-  console.log(`Escalated issue for ${guardPhone}`);
+  console.log(`Escalated issue for ${guardPhone}: ${issue}`);
 }
 
 // Main conversation handler
@@ -161,6 +189,13 @@ async function handleConversation(guardPhone, message) {
     completedSteps: [],
     startTime: null
   };
+
+  // Check for escalation request at any time
+  if (isEscalationRequest(message) && state.active) {
+    await escalateToSupervisor(guardPhone, state.issue, state.currentStep, message);
+    conversationState.delete(guardPhone);
+    return null;
+  }
 
   // New conversation
   if (!state.active) {
@@ -188,15 +223,15 @@ async function handleConversation(guardPhone, message) {
       try {
         const response = await anthropic.messages.create({
           model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
+          max_tokens: 500,
           messages: [{ role: 'user', content: message }],
-          system: 'You are WatchTower, a helpful SMS assistant for security guards at Fruitvale industrial facility. Keep responses concise and professional for SMS format.'
+          system: 'You are WatchTower, a helpful SMS assistant for security guards at Fruitvale. Keep responses SHORT (2-3 sentences max), directive, and helpful. Sound like a calm supervisor, not a chatbot. If you don\'t know, say "Text your supervisor about that."'
         });
         
         return response.content[0].text;
       } catch (error) {
         console.error('Claude API error:', error);
-        return "I'm having trouble right now. Please text your supervisor.";
+        return "I'm having trouble right now. Text your supervisor.";
       }
     }
   }
@@ -208,13 +243,13 @@ async function handleConversation(guardPhone, message) {
       state.retries += 1;
       
       if (state.retries >= CONFIG.MAX_RETRIES) {
-        await escalateToSupervisor(guardPhone, state.issue, state.currentStep);
+        await escalateToSupervisor(guardPhone, state.issue, state.currentStep, "Guard is confused");
         conversationState.delete(guardPhone);
         return null;
       }
       
       conversationState.set(guardPhone, state);
-      return `No worries! Let me explain Step ${state.currentStep} differently:\n\n${state.activeSOP.steps[state.currentStep - 1].instruction}\n\nStill stuck? Just text "help" and I'll connect you with your supervisor.`;
+      return `No worries. Here's Step ${state.currentStep} again:\n\n${state.activeSOP.steps[state.currentStep - 1].instruction}\n\nStill stuck? Text 'supervisor' and I'll get someone.`;
     }
 
     // Check for confirmation
@@ -228,7 +263,7 @@ async function handleConversation(guardPhone, message) {
         await sendEmailReport(guardPhone, state.issue, true, state.completedSteps);
         conversationState.delete(guardPhone);
         
-        await sendSMS(guardPhone, "🎉 Perfect! You're all done. Great job! Let me know if you need anything else.");
+        await sendSMS(guardPhone, "🎉 All done! Great job. Let me know if you need anything else.");
         return null;
       }
       
@@ -244,13 +279,13 @@ async function handleConversation(guardPhone, message) {
       state.retries += 1;
       
       if (state.retries >= CONFIG.MAX_RETRIES) {
-        await escalateToSupervisor(guardPhone, state.issue, state.currentStep);
+        await escalateToSupervisor(guardPhone, state.issue, state.currentStep, "Unclear responses");
         conversationState.delete(guardPhone);
         return null;
       }
       
       conversationState.set(guardPhone, state);
-      return `I didn't catch that. Are you done with Step ${state.currentStep}? Just text 'done' or 'yes' when ready, or 'help' if stuck.`;
+      return `Not sure what you mean. Are you done with Step ${state.currentStep}? Text 'done' when ready, or 'supervisor' if you need help.`;
     }
   }
 }
@@ -260,7 +295,7 @@ app.post('/sms', async (req, res) => {
   const guardPhone = req.body.From;
   const message = req.body.Body;
   
-  console.log(`Received from ${guardPhone}: ${message}`);
+  console.log(`📱 Received from ${guardPhone}: ${message}`);
   
   try {
     const response = await handleConversation(guardPhone, message);
@@ -269,14 +304,14 @@ app.post('/sms', async (req, res) => {
       const twiml = new twilio.twiml.MessagingResponse();
       twiml.message(response);
       res.type('text/xml').send(twiml.toString());
-      console.log(`Response sent: ${response.substring(0, 50)}...`);
+      console.log(`📤 Response sent: ${response.substring(0, 50)}...`);
     } else {
       res.sendStatus(200);
     }
   } catch (error) {
-    console.error('Error:', error);
+    console.error('❌ Error:', error);
     const twiml = new twilio.twiml.MessagingResponse();
-    twiml.message("Sorry, I'm having technical difficulties. Please call the office.");
+    twiml.message("Sorry, I'm having technical difficulties. Text your supervisor.");
     res.type('text/xml').send(twiml.toString());
   }
 });
@@ -285,6 +320,7 @@ app.post('/sms', async (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'WatchTower is running!', 
+    version: '2.0',
     activeConversations: conversationState.size,
     availableSOPs: ALL_SOPS.length
   });
@@ -293,8 +329,10 @@ app.get('/health', (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🗼 WatchTower is running on port ${PORT}`);
+  console.log(`\n🗼 WatchTower v2.0 is running on port ${PORT}`);
   console.log(`📱 Webhook URL: ${CONFIG.SERVER_URL}/sms`);
   console.log(`📚 Available SOPs: ${ALL_SOPS.length}`);
-  ALL_SOPS.forEach(sop => console.log(`   - ${sop.title}`));
+  console.log(`\n--- SOPs Loaded ---`);
+  ALL_SOPS.forEach(sop => console.log(`   ✓ ${sop.title}`));
+  console.log(`-------------------\n`);
 });
