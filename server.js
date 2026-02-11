@@ -1,3 +1,6 @@
+Server · JS
+Copy
+
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -76,10 +79,10 @@ function isConfirmation(message) {
   const confirmPhrases = [
     'done', 'yes', 'yeah', 'yep', 'yup', 'ok', 'okay', 'k', 
     'ready', 'good', 'got it', 'finished', 'complete', 
-    'there', 'im there', "i'm there", 'inside', 'all set', 
-    'set', 'in', "i'm in", 'im in', 'connected', 'see it',
-    'see them', 'yea', 'ye', 'ya', 'sure', 'correct', 'right',
-    '👍', '✅', '✓'
+    'there', 'im there', "i'm there", 'here', 'im here', "i'm here",
+    'inside', 'all set', 'set', 'in', "i'm in", 'im in', 
+    'connected', 'see it', 'see them', 'yea', 'ye', 'ya', 
+    'sure', 'correct', 'right', '👍', '✅', '✓'
   ];
   const lowerMessage = message.toLowerCase().trim();
   return confirmPhrases.some(phrase => lowerMessage.includes(phrase));
@@ -355,7 +358,6 @@ app.listen(PORT, () => {
   console.log(`📱 Webhook URL: ${CONFIG.SERVER_URL}/sms`);
   console.log(`📚 Available SOPs: ${ALL_SOPS.length}`);
   console.log(`📖 Company Handbook: Loaded`);
-  // v2.1 fixed
   console.log(`\n--- SOPs Loaded ---`);
   ALL_SOPS.forEach(sop => console.log(`   ✓ ${sop.title}`));
   console.log(`-------------------\n`);
