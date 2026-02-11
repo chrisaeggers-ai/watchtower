@@ -355,6 +355,7 @@ app.listen(PORT, () => {
   console.log(`📱 Webhook URL: ${CONFIG.SERVER_URL}/sms`);
   console.log(`📚 Available SOPs: ${ALL_SOPS.length}`);
   console.log(`📖 Company Handbook: Loaded`);
+  // v2.1 fixed
   console.log(`\n--- SOPs Loaded ---`);
   ALL_SOPS.forEach(sop => console.log(`   ✓ ${sop.title}`));
   console.log(`-------------------\n`);
