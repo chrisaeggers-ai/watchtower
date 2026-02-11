@@ -1,6 +1,3 @@
-Server · JS
-Copy
-
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
