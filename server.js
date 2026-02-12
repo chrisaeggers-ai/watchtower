@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
-const SDK = require('@ringcentral/sdk').SDK;
+const twilio = require('twilio');
 const Anthropic = require('@anthropic-ai/sdk');
 const nodemailer = require('nodemailer');
 const { 
@@ -19,17 +19,9 @@ app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use('/images', express.static('images'));
 
-// Initialize RingCentral SDK
-const rcsdk = new SDK({
-  server: process.env.RC_SERVER_URL,
-  clientId: process.env.RC_CLIENT_ID,
-  clientSecret: process.env.RC_CLIENT_SECRET
-});
-
-const platform = rcsdk.platform();
-
-// Initialize Anthropic
+// Initialize services
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 
 // Email setup
 const emailTransporter = nodemailer.createTransport({
@@ -45,8 +37,8 @@ const conversationState = new Map();
 
 // Configuration
 const CONFIG = {
-  RC_PHONE: process.env.RC_PHONE_NUMBER,
-  SUPERVISOR_PHONE: process.env.SUPERVISOR_PHONE || '+19259221067',
+  TWILIO_PHONE: process.env.TWILIO_PHONE_NUMBER,
+  SUPERVISOR_PHONE: process.env.SUPERVISOR_PHONE || '+1234567890',
   OWNER_EMAIL: process.env.OWNER_EMAIL,
   SERVER_URL: process.env.SERVER_URL || 'http://localhost:3000',
   MAX_RETRIES: 2
@@ -61,17 +53,6 @@ const ALL_SOPS = [
   FRUITVALE_GATE_ISSUES,
   FRUITVALE_GENERAL_HELP
 ];
-
-// Login to RingCentral on startup
-async function loginToRingCentral() {
-  try {
-    await platform.login({ jwt: process.env.RC_JWT });
-    console.log('✅ Logged into RingCentral successfully');
-  } catch (error) {
-    console.error('❌ RingCentral login failed:', error);
-    process.exit(1);
-  }
-}
 
 // Detect which SOP is needed
 function detectSOP(message) {
@@ -90,15 +71,15 @@ function detectSOP(message) {
   return null;
 }
 
-// Check for confirmation
+// Check for confirmation - expanded to catch more variations
 function isConfirmation(message) {
   const confirmPhrases = [
     'done', 'yes', 'yeah', 'yep', 'yup', 'ok', 'okay', 'k', 
     'ready', 'good', 'got it', 'finished', 'complete', 
-    'there', 'im there', "i'm there", 'here', 'im here', "i'm here",
-    'inside', 'all set', 'set', 'in', "i'm in", 'im in', 
-    'connected', 'see it', 'see them', 'yea', 'ye', 'ya', 
-    'sure', 'correct', 'right', '👍', '✅', '✓'
+    'there', 'im there', "i'm there", 'inside', 'all set', 
+    'set', 'in', "i'm in", 'im in', 'connected', 'see it',
+    'see them', 'yea', 'ye', 'ya', 'sure', 'correct', 'right',
+    '👍', '✅', '✓'
   ];
   const lowerMessage = message.toLowerCase().trim();
   return confirmPhrases.some(phrase => lowerMessage.includes(phrase));
@@ -127,27 +108,23 @@ function isEscalationRequest(message) {
   return escalationPhrases.some(phrase => lowerMessage.includes(phrase));
 }
 
-// Send SMS via RingCentral
+// Send SMS/MMS
 async function sendSMS(to, message, imageUrl = null) {
   try {
     const messageData = {
-      from: { phoneNumber: CONFIG.RC_PHONE },
-      to: [{ phoneNumber: to }],
-      text: message
+      body: message,
+      from: CONFIG.TWILIO_PHONE,
+      to: to
     };
     
-    // RingCentral MMS support
     if (imageUrl) {
-      messageData.attachments = [{
-        uri: imageUrl,
-        contentType: 'image/jpeg'
-      }];
+      messageData.mediaUrl = [imageUrl];
     }
     
-    await platform.post('/restapi/v1.0/account/~/extension/~/sms', messageData);
-    console.log(`📤 SMS sent to ${to}: ${message.substring(0, 50)}...`);
+    await twilioClient.messages.create(messageData);
+    console.log(`${imageUrl ? 'MMS' : 'SMS'} sent to ${to}: ${message.substring(0, 50)}...`);
   } catch (error) {
-    console.error('❌ Error sending SMS:', error);
+    console.error('Error sending message:', error);
   }
 }
 
@@ -182,9 +159,9 @@ async function sendEmailReport(guardPhone, issue, resolved, steps) {
       subject: subject,
       html: htmlContent
     });
-    console.log(`📧 Email report sent for ${issue}`);
+    console.log(`Email report sent for ${issue}`);
   } catch (error) {
-    console.error('❌ Error sending email:', error);
+    console.error('Error sending email:', error);
   }
 }
 
@@ -199,7 +176,7 @@ async function escalateToSupervisor(guardPhone, issue, currentStep, additionalCo
   const state = conversationState.get(guardPhone);
   await sendEmailReport(guardPhone, issue, false, state.completedSteps || []);
   
-  console.log(`🚨 Escalated issue for ${guardPhone}: ${issue}`);
+  console.log(`Escalated issue for ${guardPhone}: ${issue}`);
 }
 
 // Main conversation handler
@@ -272,12 +249,10 @@ Example bad response:
           system: systemPrompt
         });
         
-        await sendSMS(guardPhone, response.content[0].text);
-        return null;
+        return response.content[0].text;
       } catch (error) {
-        console.error('❌ Claude API error:', error);
-        await sendSMS(guardPhone, "I'm having trouble right now. Text your supervisor.");
-        return null;
+        console.error('Claude API error:', error);
+        return "I'm having trouble right now. Text your supervisor.";
       }
     }
   }
@@ -295,9 +270,7 @@ Example bad response:
       }
       
       conversationState.set(guardPhone, state);
-      const repeatMsg = `No worries. Here's Step ${state.currentStep} again:\n\n${state.activeSOP.steps[state.currentStep - 1].instruction}\n\nStill stuck? Text 'supervisor' and I'll get someone.`;
-      await sendSMS(guardPhone, repeatMsg);
-      return null;
+      return `No worries. Here's Step ${state.currentStep} again:\n\n${state.activeSOP.steps[state.currentStep - 1].instruction}\n\nStill stuck? Text 'supervisor' and I'll get someone.`;
     }
 
     // Check for confirmation
@@ -333,47 +306,34 @@ Example bad response:
       }
       
       conversationState.set(guardPhone, state);
-      const clarifyMsg = `Not sure what you mean. Are you done with Step ${state.currentStep}? Text 'done' when ready, or 'supervisor' if you need help.`;
-      await sendSMS(guardPhone, clarifyMsg);
-      return null;
+      return `Not sure what you mean. Are you done with Step ${state.currentStep}? Text 'done' when ready, or 'supervisor' if you need help.`;
     }
   }
 }
 
-// RingCentral webhook endpoint
-app.post('/webhook', async (req, res) => {
+// Twilio webhook
+app.post('/sms', async (req, res) => {
+  const guardPhone = req.body.From;
+  const message = req.body.Body;
+  
+  console.log(`📱 Received from ${guardPhone}: ${message}`);
+  
   try {
-    const body = req.body;
+    const response = await handleConversation(guardPhone, message);
     
-    // DEBUG: Log the entire request to see what RingCentral sends
-    console.log('📥 Webhook request received:', JSON.stringify(body, null, 2));
-    
-    // Handle webhook validation (RingCentral sends this when creating the webhook)
-    if (body.validationToken) {
-      console.log('📋 Webhook validation request received');
-      res.status(200).json({ validationToken: body.validationToken });
-      return;
+    if (response) {
+      const twiml = new twilio.twiml.MessagingResponse();
+      twiml.message(response);
+      res.type('text/xml').send(twiml.toString());
+      console.log(`📤 Response sent: ${response.substring(0, 50)}...`);
+    } else {
+      res.sendStatus(200);
     }
-    
-    // RingCentral sends different event types
-    if (body.event === '/restapi/v1.0/account/~/extension/~/message-store/instant?type=SMS') {
-      const message = body.body;
-      
-      // Only process inbound SMS
-      if (message.direction === 'Inbound') {
-        const guardPhone = message.from.phoneNumber;
-        const messageText = message.subject;
-        
-        console.log(`📱 Received from ${guardPhone}: ${messageText}`);
-        
-        await handleConversation(guardPhone, messageText);
-      }
-    }
-    
-    res.status(200).send('OK');
   } catch (error) {
-    console.error('❌ Webhook error:', error);
-    res.status(500).send('Error');
+    console.error('❌ Error:', error);
+    const twiml = new twilio.twiml.MessagingResponse();
+    twiml.message("Sorry, I'm having technical difficulties. Text your supervisor.");
+    res.type('text/xml').send(twiml.toString());
   }
 });
 
@@ -381,30 +341,21 @@ app.post('/webhook', async (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'WatchTower is running!', 
-    version: '2.1-RingCentral',
+    version: '2.1',
     activeConversations: conversationState.size,
     availableSOPs: ALL_SOPS.length,
-    companyKnowledge: 'Loaded',
-    platform: 'RingCentral'
+    companyKnowledge: 'Loaded'
   });
 });
 
 // Start server
 const PORT = process.env.PORT || 3000;
-
-// Login to RingCentral first, then start server
-loginToRingCentral().then(() => {
-  app.listen(PORT, () => {
-    console.log(`\n🗼 WatchTower v2.1-RingCentral is running on port ${PORT}`);
-    console.log(`📱 Webhook URL: ${CONFIG.SERVER_URL}/webhook`);
-    console.log(`📞 RingCentral Phone: ${CONFIG.RC_PHONE}`);
-    console.log(`📚 Available SOPs: ${ALL_SOPS.length}`);
-    console.log(`📖 Company Handbook: Loaded`);
-    console.log(`\n--- SOPs Loaded ---`);
-    ALL_SOPS.forEach(sop => console.log(`   ✓ ${sop.title}`));
-    console.log(`-------------------\n`);
-  });
-}).catch(error => {
-  console.error('❌ Failed to start WatchTower:', error);
-  process.exit(1);
+app.listen(PORT, () => {
+  console.log(`\n🗼 WatchTower v2.1 is running on port ${PORT}`);
+  console.log(`📱 Webhook URL: ${CONFIG.SERVER_URL}/sms`);
+  console.log(`📚 Available SOPs: ${ALL_SOPS.length}`);
+  console.log(`📖 Company Handbook: Loaded`);
+  console.log(`\n--- SOPs Loaded ---`);
+  ALL_SOPS.forEach(sop => console.log(`   ✓ ${sop.title}`));
+  console.log(`-------------------\n`);
 });
