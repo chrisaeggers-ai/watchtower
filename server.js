@@ -345,6 +345,9 @@ app.post('/webhook', async (req, res) => {
   try {
     const body = req.body;
     
+    // DEBUG: Log the entire request to see what RingCentral sends
+    console.log('📥 Webhook request received:', JSON.stringify(body, null, 2));
+    
     // Handle webhook validation (RingCentral sends this when creating the webhook)
     if (body.validationToken) {
       console.log('📋 Webhook validation request received');
