@@ -345,6 +345,13 @@ app.post('/webhook', async (req, res) => {
   try {
     const body = req.body;
     
+    // Handle webhook validation (RingCentral sends this when creating the webhook)
+    if (body.validationToken) {
+      console.log('📋 Webhook validation request received');
+      res.status(200).json({ validationToken: body.validationToken });
+      return;
+    }
+    
     // RingCentral sends different event types
     if (body.event === '/restapi/v1.0/account/~/extension/~/message-store/instant?type=SMS') {
       const message = body.body;
