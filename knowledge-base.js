@@ -1,5 +1,3 @@
-Knowledge base · JS
-Copy
 
 // ==========================================
 // FRUITVALE CAMERA/NVR TROUBLESHOOTING
