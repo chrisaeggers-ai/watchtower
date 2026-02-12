@@ -1,3 +1,6 @@
+Knowledge base · JS
+Copy
+
 // ==========================================
 // FRUITVALE CAMERA/NVR TROUBLESHOOTING
 // ==========================================
@@ -76,36 +79,171 @@ const FRUITVALE_NVR_SOP = {
   ],
   
   triggerPhrases: [
-    // Natural guard language
+    // BASIC VARIATIONS
     "cameras down",
-    "cameras aren't working",
-    "cameras not working",
-    "can't see cameras",
-    "camera screen is down",
-    "my camera screen is down",
+    "cameras are down",
+    "camera down",
+    "camera is down",
+    "cameras r down",
+    "camera r down",
+    "cameras are out",
+    "camera is out",
     "cameras out",
-    "camera feed is gone",
+    "cameras not working",
+    "camera not working",
+    "cameras aren't working",
+    "camera isn't working",
+    "cameras aint working",
+    "camera aint working",
     "cameras off",
-    "no cameras",
-    "cameras aren't showing",
-    "camera display is off",
-    "monitor is dead",
-    "monitor won't turn on",
-    "monitor is black",
+    "camera off",
+    "cameras are off",
+    "camera is off",
+    "cameras offline",
+    
+    // SCREEN/MONITOR REFERENCES
+    "screen is down",
+    "screen down",
+    "screens down",
+    "monitor is down",
+    "monitor down",
+    "monitors down",
     "screen is black",
+    "screen black",
+    "screens are black",
+    "monitor is black",
+    "monitor black",
     "screen is off",
+    "screen off",
     "screen won't turn on",
+    "monitor won't turn on",
+    "screen isn't working",
+    "monitor isn't working",
+    "display is down",
+    "display down",
+    "display is off",
+    "display off",
+    "screen is blank",
     "monitor is blank",
+    "blank screen",
+    "no display",
+    
+    // CAN'T SEE VARIATIONS
+    "can't see cameras",
+    "cant see cameras",
+    "can't see the cameras",
+    "cant see the cameras",
+    "can't see camera",
+    "cant see camera",
+    "cannot see cameras",
+    "can't view cameras",
+    "cant view cameras",
+    "can't see anything",
+    "cant see anything on cameras",
+    "can't see feeds",
+    "cant see feeds",
+    "can't see camera feeds",
+    "can't see the feed",
+    "no camera view",
+    "can't pull up cameras",
+    "cant pull up cameras",
+    "can't access cameras",
+    "cant access cameras",
+    
+    // VIDEO/FEED REFERENCES
     "no video",
-    "no camera feed",
+    "no video feed",
+    "video is down",
+    "video down",
+    "video is out",
+    "video out",
+    "video feed is down",
+    "video feed down",
+    "lost video",
     "lost camera feed",
-    "nvr down",
-    "nvr not working",
-    "nvr is off",
+    "camera feed is gone",
+    "camera feed gone",
+    "feed is down",
+    "feed down",
+    "feeds are down",
+    "no camera feed",
+    "no camera feeds",
+    "no feed",
+    "no feeds",
+    "camera feed is out",
+    
+    // SYSTEM REFERENCES
     "camera system down",
+    "camera system is down",
+    "camera system not working",
     "camera system isn't working",
+    "camera system is out",
+    "nvr down",
+    "nvr is down",
+    "nvr not working",
+    "nvr isn't working",
+    "nvr is out",
+    "nvr off",
+    "nvr is off",
+    "dw down",
+    "dw is down",
+    "dw not working",
+    "spectrum down",
+    "spectrum is down",
+    "spectrum not working",
     "dw spectrum down",
-    "spectrum not working"
+    "dw spectrum not working",
+    "surveillance system down",
+    "security cameras down",
+    "security camera system down",
+    "cctv down",
+    "cctv is down",
+    
+    // WITH SITE NAME
+    "cameras down at fruitvale",
+    "fruitvale cameras down",
+    "cameras are down at fruitvale",
+    "cameras at fruitvale are down",
+    "fruitvale camera system down",
+    "fruitvale nvr down",
+    "fruitvale cameras not working",
+    "cameras down at site",
+    "site cameras down",
+    "cameras down here",
+    "cameras here are down",
+    "our cameras are down",
+    "the cameras are down",
+    "all cameras down",
+    "all cameras are down",
+    
+    // QUESTIONS
+    "cameras down?",
+    "are cameras down",
+    "are the cameras down",
+    "is the camera down",
+    "cameras working?",
+    "are cameras working",
+    "why are cameras down",
+    "why aren't cameras working",
+    "what's wrong with cameras",
+    "whats wrong with cameras",
+    "camera issue",
+    "cameras not up",
+    "cameras still down",
+    "cameras back up?",
+    "did cameras go down",
+    
+    // URGENT/CASUAL VARIATIONS
+    "yo cameras down",
+    "hey cameras down",
+    "cameras r out",
+    "cams down",
+    "cams are down",
+    "cam down",
+    "cam is down",
+    "cameras dead",
+    "camera is dead",
+    "help cameras down"
   ]
 };
 
@@ -140,27 +278,68 @@ const FRUITVALE_FIRE_PANEL_SOP = {
   ],
   
   triggerPhrases: [
-    // Natural guard language
+    // Basic variations
     "fire alarm",
     "fire alarm won't stop",
+    "fire alarm wont stop",
+    "fire alarm is beeping",
     "fire alarm beeping",
     "fire panel beeping",
+    "fire panel is beeping",
     "alarm won't stop",
+    "alarm wont stop",
+    "alarm is beeping",
+    "alarm beeping",
     "fire panel won't stop",
+    "fire panel wont stop",
     "beeping won't quit",
+    "beeping wont quit",
     "alarm panel is beeping",
+    "alarm panel beeping",
+    
+    // Going off variations
     "fire alarm going off",
+    "fire alarm is going off",
     "fire panel is going off",
+    "fire panel going off",
+    "alarm going off",
+    "alarm is going off",
+    
+    // Reset variations
     "reset fire alarm",
+    "reset the fire alarm",
     "how do i reset fire alarm",
+    "how to reset fire alarm",
     "fire alarm reset",
     "fire panel reset",
+    "reset fire panel",
+    "need to reset fire alarm",
+    
+    // Stuck variations
     "fire panel stuck",
+    "fire panel is stuck",
     "fire alarm stuck",
+    "fire alarm is stuck",
+    "alarm stuck",
+    "alarm is stuck",
+    
+    // Other variations
     "alarm panel",
     "fire system alarm",
     "fire alarm panel",
-    "alarm panel showing error"
+    "alarm panel showing error",
+    "fire alarm error",
+    "fire panel error",
+    
+    // Urgent/casual
+    "fire alarm wont shut off",
+    "fire alarm won't shut off",
+    "cant stop fire alarm",
+    "can't stop fire alarm",
+    "fire alarm keeps going",
+    "alarm keeps beeping",
+    "help fire alarm",
+    "yo fire alarm going off"
   ]
 };
 
@@ -186,26 +365,81 @@ const FRUITVALE_ELECTRIC_FENCE_SOP = {
   ],
   
   triggerPhrases: [
-    // Natural guard language
+    // Basic
     "electric fence",
     "turn on fence",
     "turn off fence",
     "turn on the fence",
     "turn off the fence",
+    "turn fence on",
+    "turn fence off",
+    
+    // Activate/deactivate
     "activate fence",
     "deactivate fence",
+    "activate the fence",
+    "deactivate the fence",
+    "activate electric fence",
+    "deactivate electric fence",
+    
+    // How to
     "how do i turn on fence",
     "how do i turn off fence",
+    "how to turn on fence",
+    "how to turn off fence",
+    "how do i activate fence",
+    "how do i deactivate fence",
+    
+    // Alarm
     "fence alarm",
     "fence is beeping",
+    "fence beeping",
+    "fence is alarming",
+    "electric fence alarm",
+    
+    // Code
     "fence code",
+    "what's the fence code",
+    "whats the fence code",
+    "electric fence code",
+    "code for fence",
+    
+    // Panel
     "fence panel",
+    "electric fence panel",
+    "fence control panel",
+    
+    // Perimeter
     "perimeter fence",
+    "perimeter fence on",
+    "perimeter fence off",
+    
+    // Not working
     "fence not working",
+    "fence isn't working",
+    "fence isnt working",
     "fence won't turn on",
+    "fence wont turn on",
     "fence won't turn off",
+    "fence wont turn off",
+    
+    // Arm/disarm
     "how to arm fence",
-    "how to disarm fence"
+    "how to disarm fence",
+    "arm the fence",
+    "disarm the fence",
+    "arm fence",
+    "disarm fence",
+    
+    // On/off
+    "fence on",
+    "fence off",
+    "is fence on",
+    "is fence off",
+    
+    // Help
+    "help with fence",
+    "need help with fence"
   ]
 };
 
@@ -243,32 +477,101 @@ const FRUITVALE_ACCESS_CONTROL_INFO = {
   ],
   
   triggerPhrases: [
-    // Natural guard language
+    // Visitor won't show ID
     "visitor won't show id",
+    "visitor wont show id",
     "visitor doesn't have id",
+    "visitor doesnt have id",
     "visitor won't give me id",
+    "visitor wont give me id",
     "visitor refuses to show id",
+    "visitor refuses id",
+    "visitor refusing id",
+    
+    // No ID variations
     "no id",
     "they won't show id",
+    "they wont show id",
+    "won't show id",
+    "wont show id",
+    "refuses to show id",
+    "refusing to show id",
+    "no identification",
+    
+    // Check in questions
     "how do i check in visitor",
     "how to check in visitor",
+    "how do i check in a visitor",
+    "check in visitor",
+    "checking in visitor",
+    "visitor check in",
     "visitor procedure",
     "visitor protocol",
+    "visitor policy",
+    
+    // Access control general
     "access control",
+    "access control policy",
+    "access control procedure",
+    "access procedure",
+    "access policy",
+    
+    // Someone at gate
     "someone at gate",
     "someone at the gate",
     "person at gate",
+    "person at the gate",
+    "visitor at gate",
+    "visitor at the gate",
+    "people at gate",
+    
+    // Contractor variations
     "contractor at gate",
     "contractor here",
+    "contractor wants in",
+    "contractor at the gate",
+    "contractors at gate",
+    
+    // Delivery variations
     "delivery at gate",
+    "delivery here",
+    "delivery person at gate",
+    "delivery at the gate",
+    
+    // Let someone in
     "how do i let someone in",
     "how to let someone in",
     "can i let them in",
     "should i let them in",
+    "do i let them in",
+    "let visitor in",
+    "letting someone in",
+    
+    // Gate access
     "gate access",
+    "gate access policy",
+    "gate access procedure",
+    
+    // Who can come in
     "who can come in",
+    "who can enter",
+    "who is allowed in",
+    "who can i let in",
+    
+    // Visitor rules
     "visitor rules",
-    "access rules"
+    "visitor requirements",
+    
+    // Access rules
+    "access rules",
+    "entry rules",
+    "entry policy",
+    "entry procedure",
+    
+    // Questions
+    "visitor has no id",
+    "what if no id",
+    "visitor without id"
   ]
 };
 
@@ -300,20 +603,76 @@ const FRUITVALE_GATE_ISSUES = {
   ],
   
   triggerPhrases: [
+    // Basic not working
     "gate isn't working",
+    "gate isnt working",
+    "gate is not working",
     "gate not working",
+    "gates not working",
+    "gates aren't working",
+    "gates arent working",
+    
+    // Won't open/close
     "gate won't open",
+    "gate wont open",
     "gate won't close",
+    "gate wont close",
+    "can't open gate",
+    "cant open gate",
+    "can't close gate",
+    "cant close gate",
+    
+    // Stuck variations
     "gate is stuck",
     "gate stuck",
+    "gates stuck",
+    "gates are stuck",
+    "gate is jammed",
+    "gate jammed",
+    
+    // Broken variations
+    "gate is broken",
     "gate broken",
+    "gates broken",
+    "gates are broken",
+    
+    // Problem/issue
     "gate problem",
     "gate issue",
+    "problem with gate",
+    "issue with gate",
     "gate malfunction",
+    
+    // Won't move
     "gate won't move",
+    "gate wont move",
+    "gates won't move",
+    
+    // Components
     "gate motor",
+    "gate motor not working",
+    "gate motor broken",
     "gate chain",
-    "the gate isn't working"
+    "gate chain broken",
+    "gate chain off",
+    
+    // With "the"
+    "the gate isn't working",
+    "the gate is stuck",
+    "the gate won't open",
+    "the gate is broken",
+    "the gates aren't working",
+    
+    // Questions
+    "gate down?",
+    "is gate working",
+    "is the gate working",
+    "what's wrong with gate",
+    "whats wrong with gate",
+    
+    // Urgent
+    "help gate stuck",
+    "gate emergency"
   ]
 };
 
@@ -339,23 +698,73 @@ const FRUITVALE_GENERAL_HELP = {
   ],
   
   triggerPhrases: [
+    // Don't know what to do
     "i don't know what to do",
+    "i dont know what to do",
     "don't know what to do",
+    "dont know what to do",
     "not sure what to do",
+    "im not sure what to do",
+    "i'm not sure what to do",
+    "no idea what to do",
+    
+    // Confused
     "i'm confused",
+    "im confused",
     "confused",
+    "very confused",
+    "really confused",
+    "totally confused",
+    
+    // Lost
     "i'm lost",
+    "im lost",
     "lost",
+    "feel lost",
+    
+    // Need help general
     "need help",
     "i need help",
     "help me",
+    "can you help me",
+    "can someone help",
+    "need some help",
+    "need assistance",
+    
+    // What do I do
     "what do i do",
     "what should i do",
+    "what am i supposed to do",
+    "what do i do now",
+    "what should i do now",
+    
+    // Unsure
     "unsure",
     "i'm unsure",
+    "im unsure",
     "not sure",
+    "im not sure",
+    "i'm not sure",
+    
+    // Stuck
     "stuck",
-    "i'm stuck"
+    "i'm stuck",
+    "im stuck",
+    "really stuck",
+    
+    // Help general
+    "help",
+    "help!",
+    "help please",
+    "i need help please",
+    "can i get help",
+    
+    // Questions
+    "what now",
+    "what next",
+    "now what",
+    "what's next",
+    "whats next"
   ]
 };
 
