@@ -1,7 +1,7 @@
 {
-  "name": "watchtower-ringcentral",
+  "name": "watchtower",
   "version": "2.1.0",
-  "description": "SMS chatbot for security guards using RingCentral",
+  "description": "SMS chatbot for security guards",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
-    "@ringcentral/sdk": "^5.0.0",
+    "twilio": "^5.3.7",
     "body-parser": "^1.20.2",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
