@@ -38,6 +38,7 @@ const conversationState = new Map();
 // Configuration
 const CONFIG = {
   TWILIO_PHONE: process.env.TWILIO_PHONE_NUMBER,
+  WHATSAPP_MODE: process.env.WHATSAPP_MODE === 'true',
   SUPERVISOR_PHONE: process.env.SUPERVISOR_PHONE || '+1234567890',
   OWNER_EMAIL: process.env.OWNER_EMAIL,
   SERVER_URL: process.env.SERVER_URL || 'http://localhost:3000',
@@ -71,32 +72,6 @@ function detectSOP(message) {
   return null;
 }
 
-// Check for confirmation - expanded to catch more variations
-function isConfirmation(message) {
-  const confirmPhrases = [
-    'done', 'yes', 'yeah', 'yep', 'yup', 'ok', 'okay', 'k', 
-    'ready', 'good', 'got it', 'finished', 'complete', 
-    'there', 'im there', "i'm there", 'inside', 'all set', 
-    'set', 'in', "i'm in", 'im in', 'connected', 'see it',
-    'see them', 'yea', 'ye', 'ya', 'sure', 'correct', 'right',
-    '👍', '✅', '✓'
-  ];
-  const lowerMessage = message.toLowerCase().trim();
-  return confirmPhrases.some(phrase => lowerMessage.includes(phrase));
-}
-
-// Check if confused
-function isConfused(message) {
-  const confusedPhrases = [
-    'idk', "i don't know", 'confused', 'what', 'huh', 
-    'dont understand', "don't understand", 'help', 'stuck', 
-    'lost', 'unclear', 'not sure', "i'm lost", "i'm stuck",
-    'unsure', "i'm confused", 'wtf', 'where', '?'
-  ];
-  const lowerMessage = message.toLowerCase().trim();
-  return confusedPhrases.some(phrase => lowerMessage.includes(phrase));
-}
-
 // Check if asking for supervisor/escalation
 function isEscalationRequest(message) {
   const escalationPhrases = [
@@ -108,13 +83,16 @@ function isEscalationRequest(message) {
   return escalationPhrases.some(phrase => lowerMessage.includes(phrase));
 }
 
-// Send SMS/MMS
+// Send SMS/MMS (or WhatsApp)
 async function sendSMS(to, message, imageUrl = null) {
   try {
+    const toNumber = CONFIG.WHATSAPP_MODE ? `whatsapp:${to}` : to;
+    const fromNumber = CONFIG.WHATSAPP_MODE ? `whatsapp:${CONFIG.TWILIO_PHONE}` : CONFIG.TWILIO_PHONE;
+    
     const messageData = {
       body: message,
-      from: CONFIG.TWILIO_PHONE,
-      to: to
+      from: fromNumber,
+      to: toNumber
     };
     
     if (imageUrl) {
@@ -122,7 +100,7 @@ async function sendSMS(to, message, imageUrl = null) {
     }
     
     await twilioClient.messages.create(messageData);
-    console.log(`${imageUrl ? 'MMS' : 'SMS'} sent to ${to}: ${message.substring(0, 50)}...`);
+    console.log(`${imageUrl ? 'MMS' : CONFIG.WHATSAPP_MODE ? 'WhatsApp' : 'SMS'} sent to ${to}: ${message.substring(0, 50)}...`);
   } catch (error) {
     console.error('Error sending message:', error);
   }
@@ -179,7 +157,103 @@ async function escalateToSupervisor(guardPhone, issue, currentStep, additionalCo
   console.log(`Escalated issue for ${guardPhone}: ${issue}`);
 }
 
-// Main conversation handler
+// ==========================================
+// CAUTIOUS AI INTENT ANALYZER
+// ==========================================
+
+// Smart "Cautious" Intent Analyzer with Skip Detection
+async function analyzeGuardIntent(message, currentStepInfo, issueTitle) {
+  const systemPrompt = `
+You are a cautious security supervisor overseeing a troubleshooting procedure.
+
+CONTEXT:
+- Issue: "${issueTitle}"
+- Current Step: ${currentStepInfo.stepNumber} - "${currentStepInfo.instruction}"
+- User's Message: "${message}"
+
+YOUR GOAL:
+Classify the user's intent into exactly ONE of these categories:
+
+1. SOLVED: User explicitly states the *entire issue* is fixed (e.g., "Cameras are back up," "Alarm stopped," "System working").
+
+2. NEXT: User confirmed they completed the *current step* only (e.g., "Done," "Plugged it in," "I'm there," "Ready").
+
+3. STUCK: User says it didn't work, is confused, or asks a question about the current step.
+
+4. ESCALATE: User is frustrated, angry, or explicitly asking for a human/supervisor.
+
+5. CLARIFY: User's response is vague (e.g., "It worked," "Good," "Okay," "It's on"). Unclear if they mean the *step* worked or the *whole system* is fixed.
+
+6. SKIP: User indicates they are already past the current step (e.g., "I'm already in the room," "I'm looking at the monitor," "Skip to X").
+
+CRITICAL RULES:
+- Be Conservative: If user says "It worked" or "Good", return CLARIFY
+- Only return SOLVED if they explicitly mention the original problem being fixed
+- Return SKIP only if they clearly indicate being past the current step
+
+Reply ONLY with the category word (SOLVED, NEXT, STUCK, ESCALATE, CLARIFY, or SKIP).
+`;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-3-haiku-20240307', // Fast and cheap
+      max_tokens: 10,
+      messages: [{ role: 'user', content: message }],
+      system: systemPrompt
+    });
+    
+    const intent = response.content[0].text.trim().toUpperCase();
+    console.log(`🧠 AI Intent: ${intent} for: "${message}"`);
+    return intent;
+
+  } catch (error) {
+    console.error('AI Analysis Failed:', error);
+    return 'NEXT'; // Safe fallback: assume step complete
+  }
+}
+
+// Determine which step guard is at (when they SKIP ahead)
+async function determineCurrentLocation(message, allSteps, issueTitle) {
+  const stepDescriptions = allSteps.map((s, i) => 
+    `Step ${i + 1}: ${s.instruction}`
+  ).join('\n');
+  
+  const systemPrompt = `
+The user is troubleshooting: "${issueTitle}"
+
+Here are all the steps in order:
+${stepDescriptions}
+
+The user just said: "${message}"
+
+Based on their message, which step number are they currently at or ready to start?
+
+Reply ONLY with the step number (just the number, nothing else).
+If unclear, reply with "1".
+`;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-3-haiku-20240307',
+      max_tokens: 5,
+      messages: [{ role: 'user', content: message }],
+      system: systemPrompt
+    });
+    
+    const stepNum = parseInt(response.content[0].text.trim());
+    console.log(`🎯 Determined location: Step ${stepNum}`);
+    return isNaN(stepNum) ? 1 : stepNum;
+
+  } catch (error) {
+    console.error('Location determination failed:', error);
+    return 1; // Default to step 1
+  }
+}
+
+// ==========================================
+// MAIN CONVERSATION HANDLER (CAUTIOUS + SKIP)
+// ==========================================
+
 async function handleConversation(guardPhone, message) {
   let state = conversationState.get(guardPhone) || {
     active: false,
@@ -188,8 +262,13 @@ async function handleConversation(guardPhone, message) {
     activeSOP: null,
     retries: 0,
     completedSteps: [],
-    startTime: null
+    startTime: null,
+    conversationHistory: []
   };
+
+  // Add to conversation history
+  state.conversationHistory = state.conversationHistory || [];
+  state.conversationHistory.push({ role: 'guard', content: message });
 
   // Check for escalation request at any time
   if (isEscalationRequest(message) && state.active) {
@@ -198,7 +277,7 @@ async function handleConversation(guardPhone, message) {
     return null;
   }
 
-  // New conversation
+  // NEW CONVERSATION - Detect issue
   if (!state.active) {
     const detected = detectSOP(message);
     
@@ -210,13 +289,15 @@ async function handleConversation(guardPhone, message) {
         activeSOP: detected.sop,
         retries: 0,
         completedSteps: [],
-        startTime: new Date()
+        startTime: new Date(),
+        conversationHistory: [{ role: 'guard', content: message }]
       };
       conversationState.set(guardPhone, state);
       
       const firstStep = detected.sop.steps[0];
       const imageUrl = firstStep.image ? `${CONFIG.SERVER_URL}/images/${firstStep.image}` : null;
       
+      state.conversationHistory.push({ role: 'watchtower', content: firstStep.userFriendly });
       await sendSMS(guardPhone, firstStep.userFriendly, imageUrl);
       return null;
     } else {
@@ -230,17 +311,9 @@ RESPONSE RULES:
 - Keep responses SHORT (2-3 sentences max)
 - Be DIRECTIVE ("Do this" not "You might want to...")
 - Use the company knowledge above to give accurate answers
-- If you find info in the knowledge base, use it
 - If you don't know, say "Contact Emma (510-612-4813) or Chris (925-922-1067) about that"
 - Sound like a calm supervisor, not a chatbot
-- No bullet points unless listing contact numbers
-- Be professional but friendly
-
-Example good response:
-"Payday is every Friday. You'll get direct deposit or can pick up at the office. Questions? Call Emma at 510-612-4813."
-
-Example bad response:
-"According to company policy, employees are compensated on a weekly basis each Friday via direct deposit or alternative methods as elected by the employee..."`;
+- Be professional but friendly`;
 
         const response = await anthropic.messages.create({
           model: 'claude-sonnet-4-20250514',
@@ -257,63 +330,108 @@ Example bad response:
     }
   }
 
-  // Active troubleshooting
+  // ACTIVE TROUBLESHOOTING - Use intelligent interpretation
   if (state.active && state.activeSOP) {
-    // Check if confused
-    if (isConfused(message)) {
-      state.retries += 1;
-      
-      if (state.retries >= CONFIG.MAX_RETRIES) {
-        await escalateToSupervisor(guardPhone, state.issue, state.currentStep, "Guard is confused");
-        conversationState.delete(guardPhone);
-        return null;
-      }
-      
-      conversationState.set(guardPhone, state);
-      return `No worries. Here's Step ${state.currentStep} again:\n\n${state.activeSOP.steps[state.currentStep - 1].instruction}\n\nStill stuck? Text 'supervisor' and I'll get someone.`;
+    const currentStepObj = state.activeSOP.steps[state.currentStep - 1];
+    
+    // 🧠 ASK AI TO INTERPRET INTENT
+    const intent = await analyzeGuardIntent(
+      message, 
+      currentStepObj, 
+      state.issue
+    );
+
+    // CASE 1: SOLVED (Problem fixed early!) ✅
+    if (intent === 'SOLVED') {
+       state.completedSteps.push(currentStepObj);
+       await sendEmailReport(guardPhone, state.issue, true, state.completedSteps);
+       conversationState.delete(guardPhone);
+       
+       await sendSMS(guardPhone, "Great work! I've marked this as RESOLVED. Have a safe shift. ✅");
+       return null;
     }
 
-    // Check for confirmation
-    if (isConfirmation(message)) {
-      state.completedSteps.push(state.activeSOP.steps[state.currentStep - 1]);
-      state.retries = 0;
-      state.currentStep += 1;
-      
-      // Check if complete
-      if (state.currentStep > state.activeSOP.steps.length) {
-        await sendEmailReport(guardPhone, state.issue, true, state.completedSteps);
-        conversationState.delete(guardPhone);
-        
-        await sendSMS(guardPhone, "🎉 All done! Great job. Let me know if you need anything else.");
+    // CASE 2: CLARIFY (The Conservative Check) ⚠️
+    if (intent === 'CLARIFY') {
+        conversationState.set(guardPhone, state);
+        await sendSMS(guardPhone, "Just to be sure: did that fix the WHOLE problem, or are you just ready for the next step?\n\n(Text 'Fixed' if done, or 'Next' to continue)");
         return null;
-      }
-      
-      // Send next step
-      const nextStep = state.activeSOP.steps[state.currentStep - 1];
-      const imageUrl = nextStep.image ? `${CONFIG.SERVER_URL}/images/${nextStep.image}` : null;
-      conversationState.set(guardPhone, state);
-      
-      await sendSMS(guardPhone, nextStep.userFriendly, imageUrl);
-      return null;
-    } else {
-      // Unclear response
-      state.retries += 1;
-      
-      if (state.retries >= CONFIG.MAX_RETRIES) {
-        await escalateToSupervisor(guardPhone, state.issue, state.currentStep, "Unclear responses");
-        conversationState.delete(guardPhone);
-        return null;
-      }
-      
-      conversationState.set(guardPhone, state);
-      return `Not sure what you mean. Are you done with Step ${state.currentStep}? Text 'done' when ready, or 'supervisor' if you need help.`;
     }
+
+    // CASE 3: SKIP (Jump ahead) ⏭️
+    if (intent === 'SKIP') {
+        // Determine where they actually are
+        const detectedStep = await determineCurrentLocation(
+          message, 
+          state.activeSOP.steps, 
+          state.issue
+        );
+        
+        if (detectedStep > state.currentStep && detectedStep <= state.activeSOP.steps.length) {
+          // They're ahead - jump to that step
+          console.log(`⏭️ Skipping from Step ${state.currentStep} to Step ${detectedStep}`);
+          state.currentStep = detectedStep;
+          
+          const jumpStep = state.activeSOP.steps[state.currentStep - 1];
+          const imageUrl = jumpStep.image ? `${CONFIG.SERVER_URL}/images/${jumpStep.image}` : null;
+          
+          state.conversationHistory.push({ role: 'watchtower', content: jumpStep.userFriendly });
+          conversationState.set(guardPhone, state);
+          
+          await sendSMS(guardPhone, `Got it! ${jumpStep.userFriendly}`, imageUrl);
+          return null;
+        }
+        // If can't determine location, fall through to NEXT
+    }
+
+    // CASE 4: ESCALATE 🚨
+    if (intent === 'ESCALATE') {
+       await escalateToSupervisor(guardPhone, state.issue, state.currentStep, message);
+       conversationState.delete(guardPhone);
+       return null;
+    }
+
+    // CASE 5: STUCK 🤔
+    if (intent === 'STUCK') {
+       state.retries += 1;
+       if (state.retries >= CONFIG.MAX_RETRIES) {
+         await escalateToSupervisor(guardPhone, state.issue, state.currentStep, "Guard stuck on step");
+         conversationState.delete(guardPhone);
+         return null;
+       }
+       conversationState.set(guardPhone, state);
+       await sendSMS(guardPhone, `Let's try again:\n\n${currentStepObj.instruction}\n\n(Still stuck? Text 'supervisor')`);
+       return null;
+    }
+
+    // CASE 6: NEXT (Default - Step Complete) ➡️
+    state.completedSteps.push(currentStepObj);
+    state.retries = 0;
+    state.currentStep += 1;
+    
+    // Check if finished all steps
+    if (state.currentStep > state.activeSOP.steps.length) {
+      await sendEmailReport(guardPhone, state.issue, true, state.completedSteps);
+      conversationState.delete(guardPhone);
+      await sendSMS(guardPhone, "🎉 All steps complete. Great job! Marking as resolved.");
+      return null;
+    }
+    
+    // Send next step
+    const nextStep = state.activeSOP.steps[state.currentStep - 1];
+    const imageUrl = nextStep.image ? `${CONFIG.SERVER_URL}/images/${nextStep.image}` : null;
+    
+    state.conversationHistory.push({ role: 'watchtower', content: nextStep.userFriendly });
+    conversationState.set(guardPhone, state);
+    
+    await sendSMS(guardPhone, nextStep.userFriendly, imageUrl);
+    return null;
   }
 }
 
-// Twilio webhook
+// Twilio webhook (handles both SMS and WhatsApp)
 app.post('/sms', async (req, res) => {
-  const guardPhone = req.body.From;
+  const guardPhone = req.body.From.replace('whatsapp:', '');
   const message = req.body.Body;
   
   console.log(`📱 Received from ${guardPhone}: ${message}`);
@@ -341,18 +459,21 @@ app.post('/sms', async (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'WatchTower is running!', 
-    version: '2.1',
+    version: '2.2-Cautious',
     activeConversations: conversationState.size,
     availableSOPs: ALL_SOPS.length,
-    companyKnowledge: 'Loaded'
+    companyKnowledge: 'Loaded',
+    aiMode: 'Cautious + Skip'
   });
 });
 
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`\n🗼 WatchTower v2.1 is running on port ${PORT}`);
+  console.log(`\n🗼 WatchTower v2.2-Cautious is running on port ${PORT}`);
   console.log(`📱 Webhook URL: ${CONFIG.SERVER_URL}/sms`);
+  console.log(`📞 ${CONFIG.WHATSAPP_MODE ? 'WhatsApp' : 'Twilio Phone'}: ${CONFIG.TWILIO_PHONE}`);
+  console.log(`🧠 AI Mode: Cautious Intent Analysis (SOLVED/NEXT/STUCK/ESCALATE/CLARIFY/SKIP)`);
   console.log(`📚 Available SOPs: ${ALL_SOPS.length}`);
   console.log(`📖 Company Handbook: Loaded`);
   console.log(`\n--- SOPs Loaded ---`);
