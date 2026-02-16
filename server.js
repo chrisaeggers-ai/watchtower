@@ -35,6 +35,33 @@ const emailTransporter = nodemailer.createTransport({
 // In-memory conversation state
 const conversationState = new Map();
 
+// Track when we last sent an abandonment alert for each guard
+const abandonmentAlertsSent = new Map();
+
+// Check for abandoned conversations every 2 minutes
+setInterval(() => {
+  const now = Date.now();
+  const EIGHT_MINUTES = 8 * 60 * 1000; // 8 minutes in milliseconds
+  
+  conversationState.forEach((state, guardPhone) => {
+    if (!state.active || !state.lastActivity) return;
+    
+    const timeSinceActivity = now - state.lastActivity;
+    const alreadyAlerted = abandonmentAlertsSent.get(guardPhone);
+    
+    // If inactive for 8+ minutes and we haven't alerted yet
+    if (timeSinceActivity >= EIGHT_MINUTES && !alreadyAlerted) {
+      console.log(`⚠️ Guard ${guardPhone} went silent for 8+ minutes at Step ${state.currentStep}`);
+      
+      // Send alert email
+      sendAbandonmentAlert(guardPhone, state.issue, state.currentStep, state.completedSteps);
+      
+      // Mark as alerted so we don't spam
+      abandonmentAlertsSent.set(guardPhone, true);
+    }
+  });
+}, 2 * 60 * 1000); // Check every 2 minutes
+
 // Configuration
 const CONFIG = {
   TWILIO_PHONE: process.env.TWILIO_PHONE_NUMBER,
@@ -157,6 +184,43 @@ async function escalateToSupervisor(guardPhone, issue, currentStep, additionalCo
   console.log(`Escalated issue for ${guardPhone}: ${issue}`);
 }
 
+// Send abandonment alert (guard went silent mid-procedure)
+async function sendAbandonmentAlert(guardPhone, issue, currentStep, completedSteps) {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    console.log('Email not configured - skipping abandonment alert');
+    return;
+  }
+  
+  const subject = `WatchTower Alert: Guard Went Silent - ${issue}`;
+  
+  const htmlContent = `
+    <h2>⚠️ WatchTower Abandonment Alert</h2>
+    <p><strong>Status:</strong> Guard went silent mid-procedure (8+ minutes no response)</p>
+    <p><strong>Guard Phone:</strong> ${guardPhone}</p>
+    <p><strong>Issue:</strong> ${issue}</p>
+    <p><strong>Last Active Step:</strong> ${currentStep}</p>
+    <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+    <hr>
+    <h3>Steps Completed Before Going Silent:</h3>
+    <ul>
+      ${completedSteps.map(step => `<li>Step ${step.stepNumber}: ${step.instruction}</li>`).join('')}
+    </ul>
+    <p><strong>Action Needed:</strong> Guard may be stuck, distracted, or need assistance. Consider reaching out to check on them.</p>
+  `;
+
+  try {
+    await emailTransporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: CONFIG.OWNER_EMAIL,
+      subject: subject,
+      html: htmlContent
+    });
+    console.log(`📧 Abandonment alert sent for ${guardPhone} at Step ${currentStep}`);
+  } catch (error) {
+    console.error('Error sending abandonment alert:', error);
+  }
+}
+
 // ==========================================
 // CAUTIOUS AI INTENT ANALYZER
 // ==========================================
@@ -274,6 +338,7 @@ async function handleConversation(guardPhone, message) {
   if (isEscalationRequest(message) && state.active) {
     await escalateToSupervisor(guardPhone, state.issue, state.currentStep, message);
     conversationState.delete(guardPhone);
+    abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
     return null;
   }
 
@@ -290,9 +355,11 @@ async function handleConversation(guardPhone, message) {
         retries: 0,
         completedSteps: [],
         startTime: new Date(),
+        lastActivity: Date.now(), // Track last activity for abandonment detection
         conversationHistory: [{ role: 'guard', content: message }]
       };
       conversationState.set(guardPhone, state);
+      abandonmentAlertsSent.delete(guardPhone); // Clear any previous alert flag
       
       const firstStep = detected.sop.steps[0];
       const imageUrl = firstStep.image ? `${CONFIG.SERVER_URL}/images/${firstStep.image}` : null;
@@ -332,6 +399,10 @@ RESPONSE RULES:
 
   // ACTIVE TROUBLESHOOTING - Use intelligent interpretation
   if (state.active && state.activeSOP) {
+    // Update last activity timestamp (for abandonment detection)
+    state.lastActivity = Date.now();
+    conversationState.set(guardPhone, state);
+    
     const currentStepObj = state.activeSOP.steps[state.currentStep - 1];
     
     // 🧠 ASK AI TO INTERPRET INTENT
@@ -346,6 +417,7 @@ RESPONSE RULES:
        state.completedSteps.push(currentStepObj);
        await sendEmailReport(guardPhone, state.issue, true, state.completedSteps);
        conversationState.delete(guardPhone);
+       abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
        
        await sendSMS(guardPhone, "Great work! I've marked this as RESOLVED. Have a safe shift. ✅");
        return null;
@@ -388,6 +460,7 @@ RESPONSE RULES:
     if (intent === 'ESCALATE') {
        await escalateToSupervisor(guardPhone, state.issue, state.currentStep, message);
        conversationState.delete(guardPhone);
+       abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
        return null;
     }
 
@@ -397,6 +470,7 @@ RESPONSE RULES:
        if (state.retries >= CONFIG.MAX_RETRIES) {
          await escalateToSupervisor(guardPhone, state.issue, state.currentStep, "Guard stuck on step");
          conversationState.delete(guardPhone);
+         abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
          return null;
        }
        conversationState.set(guardPhone, state);
@@ -413,6 +487,7 @@ RESPONSE RULES:
     if (state.currentStep > state.activeSOP.steps.length) {
       await sendEmailReport(guardPhone, state.issue, true, state.completedSteps);
       conversationState.delete(guardPhone);
+      abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
       await sendSMS(guardPhone, "🎉 All steps complete. Great job! Marking as resolved.");
       return null;
     }
@@ -459,21 +534,23 @@ app.post('/sms', async (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'WatchTower is running!', 
-    version: '2.2-Cautious',
+    version: '2.3-Abandonment',
     activeConversations: conversationState.size,
     availableSOPs: ALL_SOPS.length,
     companyKnowledge: 'Loaded',
-    aiMode: 'Cautious + Skip'
+    aiMode: 'Cautious + Skip',
+    abandonmentDetection: '8 minutes'
   });
 });
 
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`\n🗼 WatchTower v2.2-Cautious is running on port ${PORT}`);
+  console.log(`\n🗼 WatchTower v2.3-Abandonment is running on port ${PORT}`);
   console.log(`📱 Webhook URL: ${CONFIG.SERVER_URL}/sms`);
   console.log(`📞 ${CONFIG.WHATSAPP_MODE ? 'WhatsApp' : 'Twilio Phone'}: ${CONFIG.TWILIO_PHONE}`);
   console.log(`🧠 AI Mode: Cautious Intent Analysis (SOLVED/NEXT/STUCK/ESCALATE/CLARIFY/SKIP)`);
+  console.log(`⏰ Abandonment Detection: Alerts after 8 minutes of silence`);
   console.log(`📚 Available SOPs: ${ALL_SOPS.length}`);
   console.log(`📖 Company Handbook: Loaded`);
   console.log(`\n--- SOPs Loaded ---`);
