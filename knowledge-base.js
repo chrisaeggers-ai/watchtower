@@ -800,107 +800,40 @@ const FRUITVALE_GENERAL_HELP = {
   ],
   
   triggerPhrases: [
-    // 250 COMPREHENSIVE EMPLOYEE HANDBOOK TRIGGERS
+    // ONLY general confusion/help phrases (NOT handbook questions)
+    // Handbook questions will be answered by Claude AI with company knowledge
     
-    // PAYROLL & PAYDAY (40 questions)
-    "when is payday", "what day is payday", "when do i get paid", "when do we get paid",
-    "what's payday", "whats payday", "pay day", "payday schedule", "when's my paycheck",
-    "whens my paycheck", "when does pay come", "what day do we get paid", "pay schedule",
-    "payment schedule", "when's the next payday", "whens the next payday",
-    "how often do we get paid", "weekly pay or biweekly", "direct deposit schedule",
-    "when is direct deposit", "when does direct deposit hit", "what time does direct deposit",
-    "check pickup schedule", "where do i pick up my check", "when can i get my check",
-    "paycheck not received", "didn't get paid", "didnt get paid", "missing paycheck",
-    "where's my pay", "wheres my pay", "haven't been paid", "havent been paid",
-    "paystub question", "how do i get my paystub", "where's my paystub", "wheres my paystub",
-    "view paystub", "pay rate question", "what's my pay rate", "whats my pay rate",
-    "hourly rate", "overtime pay", "how much is overtime",
-    
-    // TIME OFF & SCHEDULING (50 questions)
-    "how do i request time off", "request time off", "time off request", "pto request",
-    "vacation request", "how do i ask for time off", "need time off", "want to request a day off",
-    "how do i call out", "call out procedure", "sick day procedure", "how do i call in sick",
-    "who do i call for sick day", "sick leave policy", "how many sick days", "vacation days",
-    "how much pto", "pto balance", "time off balance", "accrued time off", "unpaid time off",
-    "personal day", "emergency time off", "family emergency leave", "bereavement leave",
-    "medical leave", "how far in advance time off", "time off approval", "who approves time off",
-    "time off denied", "can't get time off", "cant get time off", "schedule change request",
-    "shift change", "swap shifts", "trade shifts", "cover my shift", "find shift coverage",
-    "who covers my shift", "shift swap policy", "schedule posted when", "where's the schedule",
-    "wheres the schedule", "view my schedule", "check my schedule", "what's my schedule",
-    "whats my schedule", "am i scheduled", "when do i work", "what days do i work",
-    "schedule conflict",
-    
-    // UNIFORM & DRESS CODE (30 questions)
-    "uniform policy", "what's the uniform", "whats the uniform", "dress code", "what do i wear",
-    "uniform requirements", "where do i get uniform", "how do i get a uniform", "uniform order",
-    "new uniform needed", "replace uniform", "uniform damaged", "lost my uniform",
-    "uniform allowance", "do i pay for uniform", "uniform cost", "shirt requirements",
-    "pants requirements", "shoes requirements", "boot requirements", "what shoes can i wear",
-    "steel toe required", "badge policy", "name tag policy", "id badge", "where's my badge",
-    "wheres my badge", "lost my badge", "replace badge", "cold weather gear", "jacket policy",
-    
-    // BENEFITS & INSURANCE (25 questions)
-    "health insurance", "medical benefits", "when do benefits start", "benefits eligibility",
-    "dental insurance", "vision insurance", "insurance enrollment", "how do i enroll",
-    "benefits package", "what benefits offered", "401k information", "retirement plan",
-    "life insurance", "disability insurance", "workers comp", "workers compensation",
-    "how do i file workers comp", "injury at work", "work injury procedure",
-    "medical emergency at work", "go to doctor work injury", "which doctor for injury",
-    "hospital for work injury", "report injury", "accident report",
-    
-    // HR POLICIES & PROCEDURES (40 questions)
-    "company handbook", "where's the handbook", "wheres the handbook", "employee handbook",
-    "read the handbook", "handbook rules", "company policies", "company rules", "break policy",
-    "lunch break policy", "how long is lunch", "when's my break", "whens my break",
-    "break schedule", "smoke break policy", "can i smoke", "where can i smoke",
-    "cell phone policy", "phone usage policy", "can i use my phone", "social media policy",
-    "recording policy", "photos at work", "video at work", "visitor policy at work",
-    "can family visit", "bringing guests", "attendance policy", "tardiness policy",
-    "late to work", "clocking in late", "missed clock in", "forgot to clock in",
-    "time clock issues", "how do i clock in", "where do i clock in", "clock out procedure",
-    "timesheet correction", "timecard error", "wrong hours logged", "dispute hours",
-    
-    // EMERGENCY CONTACTS & REPORTING (30 questions)
-    "who do i call", "emergency contact", "supervisor phone number", "manager contact",
-    "emma's number", "emmas number", "emma phone number", "chris phone number",
-    "chris contact", "office phone number", "main office contact", "after hours contact",
-    "weekend emergency", "who do i report to", "chain of command", "incident reporting",
-    "how do i report incident", "report accident", "report theft", "report vandalism",
-    "report suspicious activity", "security breach reporting", "safety concern",
-    "report safety issue", "osha complaint", "harassment reporting", "report harassment",
-    "discrimination reporting", "hr complaint", "file complaint", "grievance procedure",
-    
-    // TRAINING & CERTIFICATION (20 questions)
-    "training requirements", "mandatory training", "when's training", "whens training",
-    "guard card", "security license", "renew guard card", "guard card expired",
-    "cpr certification", "first aid training", "aed training", "fire safety training",
-    "active shooter training", "de-escalation training", "baton training",
-    "pepper spray training", "taser training", "firearm training", "training reimbursement",
-    "certification reimbursement", "continuing education",
-    
-    // MISCELLANEOUS (15 questions)
-    "parking at work", "where do i park", "employee parking", "parking pass",
-    "gas reimbursement", "mileage reimbursement", "travel expenses", "meal allowance",
-    "equipment provided", "what equipment provided", "supply request", "need supplies",
-    "order supplies", "performance review", "when's my review", "whens my review",
-    
-    // SHORTENED/CASUAL VARIATIONS
-    "payday?", "when paid", "time off", "call out", "uniform", "benefits", "handbook",
-    "who do i call", "break policy", "schedule",
-    
-    // ORIGINAL GENERAL HELP PHRASES (keeping these too)
+    // Don't know what to do
     "i don't know what to do", "i dont know what to do", "don't know what to do",
     "dont know what to do", "not sure what to do", "im not sure what to do",
-    "i'm not sure what to do", "no idea what to do", "i'm confused", "im confused",
-    "confused", "very confused", "really confused", "totally confused", "i'm lost",
-    "im lost", "lost", "feel lost", "need help", "i need help", "help me",
-    "can you help me", "can someone help", "need some help", "need assistance",
-    "what do i do", "what should i do", "what am i supposed to do", "what do i do now",
-    "what should i do now", "unsure", "i'm unsure", "im unsure", "not sure",
-    "stuck", "i'm stuck", "im stuck", "really stuck", "help", "help!", "help please",
-    "i need help please", "can i get help", "what now", "what next", "now what",
-    "what's next", "whats next"
+    "i'm not sure what to do", "no idea what to do",
+    
+    // Confused
+    "i'm confused", "im confused", "confused", "very confused", "really confused",
+    "totally confused",
+    
+    // Lost
+    "i'm lost", "im lost", "lost", "feel lost",
+    
+    // Need help general (but vague - no specific topic)
+    "need help", "i need help", "help me", "can you help me", "can someone help",
+    "need some help", "need assistance",
+    
+    // What do I do (vague)
+    "what do i do", "what should i do", "what am i supposed to do",
+    "what do i do now", "what should i do now",
+    
+    // Unsure
+    "unsure", "i'm unsure", "im unsure", "not sure",
+    
+    // Stuck
+    "stuck", "i'm stuck", "im stuck", "really stuck",
+    
+    // Help general (vague)
+    "help", "help!", "help please", "i need help please", "can i get help",
+    
+    // Questions (vague)
+    "what now", "what next", "now what", "what's next", "whats next"
   ]
 };
 
