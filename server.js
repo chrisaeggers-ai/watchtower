@@ -362,7 +362,7 @@ async function sendAbandonmentAlert(guardPhone, issue, currentStep, completedSte
 // CAUTIOUS AI INTENT ANALYZER
 // ==========================================
 
-// Smart "Cautious" Intent Analyzer with Skip Detection
+// Smart "Cautious" Intent Analyzer with CONFIDENCE SCORING (MIT-level metacognition)
 async function analyzeGuardIntent(message, currentStepInfo, issueTitle) {
   const systemPrompt = `
 You are a cautious security supervisor overseeing a troubleshooting procedure.
@@ -392,24 +392,40 @@ CRITICAL RULES:
 - Only return SOLVED if they explicitly mention the original problem being fixed
 - Return SKIP only if they clearly indicate being past the current step
 
-Reply ONLY with the category word (SOLVED, NEXT, STUCK, ESCALATE, CLARIFY, or SKIP).
+CONFIDENCE SCORING:
+After determining the category, rate your confidence (0-100):
+- 90-100: Extremely clear intent (e.g., "done", "cameras are back up")
+- 70-89: Pretty confident (clear but could have edge cases)
+- 50-69: Unsure (vague message, multiple interpretations)
+- 0-49: Very uncertain (ambiguous, contradictory)
+
+Reply in this EXACT format:
+CATEGORY CONFIDENCE
+Example: NEXT 95
+Example: CLARIFY 60
+Example: SOLVED 85
 `;
 
   try {
     const response = await anthropic.messages.create({
-      model: 'claude-3-haiku-20240307', // Fast and cheap
-      max_tokens: 10,
+      model: 'claude-3-haiku-20240307',
+      max_tokens: 20,
       messages: [{ role: 'user', content: message }],
       system: systemPrompt
     });
     
-    const intent = response.content[0].text.trim().toUpperCase();
-    console.log(`🧠 AI Intent: ${intent} for: "${message}"`);
-    return intent;
+    const responseText = response.content[0].text.trim().toUpperCase();
+    const parts = responseText.split(/\s+/);
+    const intent = parts[0];
+    const confidence = parts[1] ? parseInt(parts[1]) : 75; // Default to 75 if not provided
+    
+    console.log(`🧠 AI Intent: ${intent} (${confidence}% confident) for: "${message}"`);
+    
+    return { intent, confidence };
 
   } catch (error) {
     console.error('AI Analysis Failed:', error);
-    return 'NEXT'; // Safe fallback: assume step complete
+    return { intent: 'NEXT', confidence: 50 }; // Low confidence fallback
   }
 }
 
@@ -542,12 +558,26 @@ RESPONSE RULES:
     
     const currentStepObj = state.activeSOP.steps[state.currentStep - 1];
     
-    // 🧠 ASK AI TO INTERPRET INTENT
-    const intent = await analyzeGuardIntent(
+    // 🧠 ASK AI TO INTERPRET INTENT (with confidence scoring)
+    const { intent, confidence } = await analyzeGuardIntent(
       message, 
       currentStepObj, 
       state.issue
     );
+
+    // 🎓 CONFIDENCE CHECK: If AI is unsure, ask for clarification (MIT-level metacognition)
+    if (confidence < 70 && intent !== 'CLARIFY' && intent !== 'ESCALATE') {
+      console.log(`⚠️ Low confidence (${confidence}%) - asking for clarification`);
+      conversationState.set(guardPhone, state);
+      await sendSMS(guardPhone, 
+        "Just to make sure I understand - are you saying:\n\n" +
+        "1. Problem is completely SOLVED\n" +
+        "2. This step is DONE, ready for next\n" +
+        "3. You're STUCK on this step\n\n" +
+        "Reply with the number (1, 2, or 3)"
+      );
+      return null;
+    }
 
     // CASE 1: SOLVED (Problem fixed early!) ✅
     if (intent === 'SOLVED') {
