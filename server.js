@@ -45,6 +45,43 @@ const dailyTasks = {
   abandoned: []
 };
 
+// 📊 WEEKLY ANALYTICS: Store detailed incident data for Monday reports
+const weeklyAnalytics = {
+  incidents: [],          // All incidents with full metadata
+  unrecognizedPhrases: [], // Messages that didn't trigger SOPs
+  startDate: new Date(),   // Week start
+  lastWeekBaseline: {      // Previous week's data for comparison
+    cameraCount: 0,
+    gateCount: 0,
+    firePanelCount: 0,
+    fenceCount: 0,
+    accessCount: 0
+  }
+};
+
+// Store incident with full metadata for analytics
+function logIncident(guardPhone, issue, resolved, steps, resolutionTime, escalated = false, abandoned = false) {
+  weeklyAnalytics.incidents.push({
+    guardPhone,
+    issue,
+    resolved,
+    escalated,
+    abandoned,
+    stepCount: steps.length,
+    resolutionTime, // in seconds
+    timestamp: new Date(),
+    confidence: null // Will be populated if we tracked it
+  });
+}
+
+// Store unrecognized phrase for trigger optimization
+function logUnrecognizedPhrase(message) {
+  // Avoid duplicates and very short messages
+  if (message.length > 5 && !weeklyAnalytics.unrecognizedPhrases.includes(message.toLowerCase())) {
+    weeklyAnalytics.unrecognizedPhrases.push(message.toLowerCase());
+  }
+}
+
 // DAILY DIGEST: Send summary email at 6am Pacific every day
 function scheduleDailyDigest() {
   setInterval(() => {
@@ -56,6 +93,22 @@ function scheduleDailyDigest() {
     // Send at 6:00 AM Pacific (check every minute)
     if (hour === 6 && minute === 0) {
       sendDailyDigestEmail();
+    }
+  }, 60 * 1000); // Check every minute
+}
+
+// 📊 WEEKLY ANALYTICS: Send comprehensive report every Monday at 9am Pacific
+function scheduleWeeklyAnalytics() {
+  setInterval(() => {
+    const now = new Date();
+    const pacificTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+    const dayOfWeek = pacificTime.getDay(); // 0 = Sunday, 1 = Monday
+    const hour = pacificTime.getHours();
+    const minute = pacificTime.getMinutes();
+    
+    // Send every Monday at 9:00 AM Pacific
+    if (dayOfWeek === 1 && hour === 9 && minute === 0) {
+      sendWeeklyAnalyticsEmail();
     }
   }, 60 * 1000); // Check every minute
 }
@@ -159,8 +212,261 @@ async function sendDailyDigestEmail() {
   }
 }
 
+// 📊 WEEKLY ANALYTICS: Generate and send comprehensive weekly report
+async function sendWeeklyAnalyticsEmail() {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    console.log('Email not configured - skipping weekly analytics');
+    return;
+  }
+
+  const endDate = new Date();
+  const startDate = weeklyAnalytics.startDate;
+  const dateRange = `${startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  
+  // Skip if no incidents this week
+  if (weeklyAnalytics.incidents.length === 0) {
+    console.log('📧 No incidents this week - skipping weekly analytics');
+    resetWeeklyAnalytics();
+    return;
+  }
+
+  // ANALYZE DATA
+  const incidents = weeklyAnalytics.incidents;
+  
+  // Count by type
+  const cameraIncidents = incidents.filter(i => i.issue.includes('Camera') || i.issue.includes('NVR'));
+  const gateIncidents = incidents.filter(i => i.issue.includes('Gate'));
+  const fireIncidents = incidents.filter(i => i.issue.includes('Fire'));
+  const fenceIncidents = incidents.filter(i => i.issue.includes('Fence'));
+  const accessIncidents = incidents.filter(i => i.issue.includes('Access'));
+  
+  // Calculate metrics
+  const resolvedIncidents = incidents.filter(i => i.resolved);
+  const escalatedIncidents = incidents.filter(i => i.escalated);
+  const abandonedIncidents = incidents.filter(i => i.abandoned);
+  
+  const avgResolutionTime = resolvedIncidents.length > 0 
+    ? Math.round(resolvedIncidents.reduce((sum, i) => sum + (i.resolutionTime || 0), 0) / resolvedIncidents.length / 60)
+    : 0;
+  
+  const escalationRate = incidents.length > 0 
+    ? Math.round((escalatedIncidents.length / incidents.length) * 100)
+    : 0;
+  
+  // Guard performance analysis
+  const guardStats = {};
+  incidents.forEach(incident => {
+    const last4 = incident.guardPhone.slice(-4);
+    if (!guardStats[last4]) {
+      guardStats[last4] = { 
+        count: 0, 
+        totalTime: 0, 
+        escalations: 0,
+        resolutions: 0
+      };
+    }
+    guardStats[last4].count++;
+    if (incident.resolutionTime) guardStats[last4].totalTime += incident.resolutionTime;
+    if (incident.escalated) guardStats[last4].escalations++;
+    if (incident.resolved) guardStats[last4].resolutions++;
+  });
+  
+  // Equipment health alerts
+  const equipmentAlerts = [];
+  const baseline = weeklyAnalytics.lastWeekBaseline;
+  
+  if (cameraIncidents.length > baseline.cameraCount * 2) {
+    equipmentAlerts.push({
+      system: 'Camera/NVR System',
+      count: cameraIncidents.length,
+      increase: Math.round(((cameraIncidents.length - baseline.cameraCount) / Math.max(baseline.cameraCount, 1)) * 100)
+    });
+  }
+  if (gateIncidents.length > baseline.gateCount * 2) {
+    equipmentAlerts.push({
+      system: 'Gate System',
+      count: gateIncidents.length,
+      increase: Math.round(((gateIncidents.length - baseline.gateCount) / Math.max(baseline.gateCount, 1)) * 100)
+    });
+  }
+  if (fireIncidents.length > baseline.firePanelCount * 2) {
+    equipmentAlerts.push({
+      system: 'Fire Panel',
+      count: fireIncidents.length,
+      increase: Math.round(((fireIncidents.length - baseline.firePanelCount) / Math.max(baseline.firePanelCount, 1)) * 100)
+    });
+  }
+  
+  // Peak time analysis
+  const hourCounts = {};
+  incidents.forEach(incident => {
+    const hour = incident.timestamp.getHours();
+    hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+  });
+  const peakHour = Object.keys(hourCounts).reduce((a, b) => hourCounts[a] > hourCounts[b] ? a : b, 0);
+  const peakCount = hourCounts[peakHour];
+  const peakPercentage = Math.round((peakCount / incidents.length) * 100);
+
+  // BUILD EMAIL
+  const subject = `📊 WatchTower Weekly Analytics - ${dateRange}`;
+  
+  let htmlContent = `
+    <h2>📊 WATCHTOWER WEEKLY REPORT</h2>
+    <p><strong>Week:</strong> ${dateRange}</p>
+    <hr>
+    
+    <h3>📋 INCIDENT SUMMARY</h3>
+    <ul>
+      <li>Camera/NVR: ${cameraIncidents.length} incidents ${getComparisonIcon(cameraIncidents.length, baseline.cameraCount)}</li>
+      <li>Gate Issues: ${gateIncidents.length} incidents ${getComparisonIcon(gateIncidents.length, baseline.gateCount)}</li>
+      <li>Fire Panel: ${fireIncidents.length} incidents ${getComparisonIcon(fireIncidents.length, baseline.firePanelCount)}</li>
+      <li>Electric Fence: ${fenceIncidents.length} incidents ${getComparisonIcon(fenceIncidents.length, baseline.fenceCount)}</li>
+      <li>Access Control: ${accessIncidents.length} questions answered ${getComparisonIcon(accessIncidents.length, baseline.accessCount)}</li>
+    </ul>
+    <p><strong>TOTAL:</strong> ${incidents.length} incidents this week</p>
+    <br>
+    
+    <h3>📈 PERFORMANCE METRICS</h3>
+    <ul>
+      <li>Avg resolution time: ${avgResolutionTime} min</li>
+      <li>Escalation rate: ${escalationRate}% ${escalationRate > 10 ? '⚠️ Above target' : '✅'}</li>
+      <li>Abandonment incidents: ${abandonedIncidents.length}</li>
+      <li>Successful resolutions: ${resolvedIncidents.length} (${Math.round((resolvedIncidents.length / incidents.length) * 100)}%)</li>
+    </ul>
+    <br>
+  `;
+  
+  // Equipment health alerts
+  if (equipmentAlerts.length > 0) {
+    htmlContent += `
+      <h3>⚠️ EQUIPMENT HEALTH ALERTS</h3>
+      <ul>
+    `;
+    equipmentAlerts.forEach(alert => {
+      htmlContent += `
+        <li><strong>${alert.system}:</strong> ${alert.count} incidents this week (↑${alert.increase}% above baseline)<br>
+        → <strong>Recommend maintenance check</strong></li>
+      `;
+    });
+    htmlContent += `</ul><br>`;
+  } else {
+    htmlContent += `
+      <h3>✅ EQUIPMENT HEALTH</h3>
+      <p>All systems operating within normal parameters</p>
+      <br>
+    `;
+  }
+  
+  // Guard insights
+  htmlContent += `
+    <h3>👤 GUARD INSIGHTS</h3>
+    <ul>
+  `;
+  Object.keys(guardStats).forEach(guardLast4 => {
+    const stats = guardStats[guardLast4];
+    const avgTime = stats.totalTime > 0 ? Math.round(stats.totalTime / stats.resolutions / 60) : 0;
+    const successRate = Math.round((stats.resolutions / stats.count) * 100);
+    
+    let performance = '✅';
+    let notes = '';
+    if (stats.escalations > 2) {
+      performance = '⚠️';
+      notes = ' - Consider additional training';
+    } else if (avgTime < 5 && successRate > 90) {
+      performance = '⭐';
+      notes = ' - Star performer';
+    }
+    
+    htmlContent += `
+      <li>Guard ending in ${guardLast4}: ${stats.count} incidents, ${avgTime} min avg ${performance}${notes}</li>
+    `;
+  });
+  htmlContent += `</ul><br>`;
+  
+  // Trigger optimization
+  if (weeklyAnalytics.unrecognizedPhrases.length > 0) {
+    htmlContent += `
+      <h3>🔧 TRIGGER OPTIMIZATION SUGGESTIONS</h3>
+      <p>Guards used these phrases that didn't trigger SOPs:</p>
+      <ul>
+    `;
+    weeklyAnalytics.unrecognizedPhrases.slice(0, 10).forEach(phrase => {
+      htmlContent += `<li>"${phrase}"</li>`;
+    });
+    htmlContent += `</ul>
+      <p><em>Consider adding these to relevant trigger lists</em></p>
+      <br>
+    `;
+  }
+  
+  // Peak incident times
+  htmlContent += `
+    <h3>🕐 PEAK INCIDENT TIMES</h3>
+    <p><strong>${formatHour(peakHour)}</strong>: ${peakPercentage}% of incidents occurred during this hour</p>
+    <p><em>Consider adjusting staffing or preventive maintenance during peak hours</em></p>
+    <br>
+  `;
+  
+  htmlContent += `
+    <hr>
+    <p><em>Next report: Next Monday at 9:00 AM Pacific</em></p>
+  `;
+
+  try {
+    await emailTransporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: CONFIG.OWNER_EMAIL,
+      subject: subject,
+      html: htmlContent
+    });
+    console.log(`📊 Weekly analytics sent: ${incidents.length} incidents analyzed`);
+    
+    // Update baseline for next week
+    weeklyAnalytics.lastWeekBaseline = {
+      cameraCount: cameraIncidents.length,
+      gateCount: gateIncidents.length,
+      firePanelCount: fireIncidents.length,
+      fenceCount: fenceIncidents.length,
+      accessCount: accessIncidents.length
+    };
+    
+    // Reset for new week
+    resetWeeklyAnalytics();
+  } catch (error) {
+    console.error('Error sending weekly analytics:', error);
+  }
+}
+
+// Helper function to reset weekly analytics
+function resetWeeklyAnalytics() {
+  weeklyAnalytics.incidents = [];
+  weeklyAnalytics.unrecognizedPhrases = [];
+  weeklyAnalytics.startDate = new Date();
+}
+
+// Helper function for comparison icons
+function getComparisonIcon(current, baseline) {
+  if (baseline === 0) return '';
+  const change = current - baseline;
+  if (change > 0) return `(↑${change} from last week)`;
+  if (change < 0) return `(↓${Math.abs(change)} from last week)`;
+  return '(→ same as last week)';
+}
+
+// Helper function to format hour
+function formatHour(hour) {
+  const h = parseInt(hour);
+  if (h === 0) return '12:00 AM - 1:00 AM';
+  if (h < 12) return `${h}:00 AM - ${h + 1}:00 AM`;
+  if (h === 12) return '12:00 PM - 1:00 PM';
+  return `${h - 12}:00 PM - ${h - 11}:00 PM`;
+}
+
 // Start the daily digest scheduler
 scheduleDailyDigest();
+
+// Start the weekly analytics scheduler
+scheduleWeeklyAnalytics();
 
 // Check for abandoned conversations every 2 minutes
 setInterval(() => {
@@ -178,7 +484,7 @@ setInterval(() => {
       console.log(`⚠️ Guard ${guardPhone} went silent for 8+ minutes at Step ${state.currentStep}`);
       
       // Send alert email
-      sendAbandonmentAlert(guardPhone, state.issue, state.currentStep, state.completedSteps);
+      sendAbandonmentAlert(guardPhone, state.issue, state.currentStep, state.completedSteps, state.startTime);
       
       // Mark as alerted so we don't spam
       abandonmentAlertsSent.set(guardPhone, true);
@@ -303,13 +609,20 @@ async function escalateToSupervisor(guardPhone, issue, currentStep, additionalCo
   await sendSMS(guardPhone, "Connecting you with your supervisor. They'll reach out shortly.");
   
   const state = conversationState.get(guardPhone);
+  
+  // Calculate time spent before escalation
+  const resolutionTime = state.startTime ? Math.round((Date.now() - state.startTime) / 1000) : 0;
+  
+  // Log incident for weekly analytics
+  logIncident(guardPhone, issue, false, state.completedSteps || [], resolutionTime, true, false);
+  
   await sendEmailReport(guardPhone, issue, false, state.completedSteps || []);
   
   console.log(`Escalated issue for ${guardPhone}: ${issue}`);
 }
 
 // Send abandonment alert (guard went silent mid-procedure) - IMMEDIATE EMAIL
-async function sendAbandonmentAlert(guardPhone, issue, currentStep, completedSteps) {
+async function sendAbandonmentAlert(guardPhone, issue, currentStep, completedSteps, startTime) {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
     console.log('Email not configured - skipping abandonment alert');
     return;
@@ -317,6 +630,12 @@ async function sendAbandonmentAlert(guardPhone, issue, currentStep, completedSte
   
   const now = new Date();
   const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  
+  // Calculate time before abandonment
+  const resolutionTime = startTime ? Math.round((Date.now() - startTime) / 1000) : 0;
+  
+  // Log incident for weekly analytics
+  logIncident(guardPhone, issue, false, completedSteps, resolutionTime, false, true);
   
   // Store for daily digest
   dailyTasks.abandoned.push({
@@ -582,6 +901,13 @@ RESPONSE RULES:
     // CASE 1: SOLVED (Problem fixed early!) ✅
     if (intent === 'SOLVED') {
        state.completedSteps.push(currentStepObj);
+       
+       // Calculate resolution time
+       const resolutionTime = state.startTime ? Math.round((Date.now() - state.startTime) / 1000) : 0;
+       
+       // Log incident for weekly analytics
+       logIncident(guardPhone, state.issue, true, state.completedSteps, resolutionTime, false, false);
+       
        await sendEmailReport(guardPhone, state.issue, true, state.completedSteps);
        conversationState.delete(guardPhone);
        abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
