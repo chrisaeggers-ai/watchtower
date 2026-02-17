@@ -1,696 +1,847 @@
-require('dotenv').config();
-const express = require('express');
-const bodyParser = require('body-parser');
-const twilio = require('twilio');
-const Anthropic = require('@anthropic-ai/sdk');
-const nodemailer = require('nodemailer');
-const { 
+// ==========================================
+// FRUITVALE CAMERA/NVR TROUBLESHOOTING
+// ==========================================
+const FRUITVALE_NVR_SOP = {
+  title: "Fruitvale NVR/DW Camera System Troubleshooting",
+  site: "Fruitvale",
+  steps: [
+    {
+      stepNumber: 1,
+      instruction: "Go to the IT room door next to the fire alarm panel.",
+      userFriendly: "Head to the IT room - it's the door right next to the fire alarm panel. Text 'done' when you're there.",
+      waitForConfirmation: true,
+      image: "step1.jpg"
+    },
+    {
+      stepNumber: 2,
+      instruction: "Enter code 1078 on the padlock to unlock the door.",
+      userFriendly: "Enter 1078 on the padlock. Text 'done' when you're in.",
+      waitForConfirmation: true,
+      image: "step2.jpg"
+    },
+    {
+      stepNumber: 3,
+      instruction: "Disconnect HDMI cable (1) from NVR and connect HDMI cable (2) to bring up NVR display on small monitor in IT room.",
+      userFriendly: "Find the 2 HDMI cables. Disconnect cable 1, plug in cable 2. This shows the display on the small monitor. Done?",
+      waitForConfirmation: true,
+      image: "step3.jpg"
+    },
+    {
+      stepNumber: 4,
+      instruction: "Connect the mouse and keyboard cables to the USB ports on the NVR.",
+      userFriendly: "Plug the mouse and keyboard into the USB ports on the NVR. Ready?",
+      waitForConfirmation: true,
+      image: "step4.jpg"
+    },
+    {
+      stepNumber: 5,
+      instruction: "Click on 'DW' on the left side of the screen.",
+      userFriendly: "Click 'DW' on the left side of the screen. Let me know when you've done that.",
+      waitForConfirmation: true,
+      image: "step5.jpg"
+    },
+    {
+      stepNumber: 6,
+      instruction: "Click on 'OiFunds Fruitvale' to connect to the server.",
+      userFriendly: "Click 'OiFunds Fruitvale' to connect. Text me once it connects.",
+      waitForConfirmation: false
+    },
+    {
+      stepNumber: 7,
+      instruction: "If server doesn't accept 'OiFunds', use manual connection: Click 'Connect to Server', enter User: admin, Password: admin12345, click OK.",
+      userFriendly: "If it doesn't connect:\n\n1. Click 'Connect to Server'\n2. Username: admin\n3. Password: admin12345\n4. Click OK\n\nConnected?",
+      waitForConfirmation: true,
+      image: "step7.jpg"
+    },
+    {
+      stepNumber: 8,
+      instruction: "If cameras don't automatically show up, click dropdown arrow next to 'New Layout 1' and select 'Guard View'.",
+      userFriendly: "If cameras aren't showing, click the dropdown next to 'New Layout 1' and select 'Guard View'. See them now?",
+      waitForConfirmation: true,
+      image: "step8.jpg"
+    },
+    {
+      stepNumber: 9,
+      instruction: "Alternative: Click side arrow on left to open camera panel, scroll to 'Guard View' and double-click it.",
+      userFriendly: "Still nothing? Click the side arrow on the left, scroll to 'Guard View' and double-click it. Cameras up?",
+      waitForConfirmation: false
+    },
+    {
+      stepNumber: 10,
+      instruction: "IMPORTANT: Disconnect HDMI cable and mouse/keyboard, then reconnect the original HDMI cable to make cameras show on guard shack TV.",
+      userFriendly: "Last step: Unplug the HDMI and mouse/keyboard. Reconnect the original HDMI cable so cameras show back up on the TV. IMPORTANT - don't skip this! Done?",
+      waitForConfirmation: true,
+      image: "step10.jpg"
+    }
+  ],
+  
+  triggerPhrases: [
+    // 150 COMPREHENSIVE CAMERA/NVR TRIGGERS
+    "cameras are down", "cameras aren't working", "cameras not working", "camera system is down",
+    "the cameras went down", "cameras went out", "i can't see the cameras", "cant see cameras",
+    "no camera feed", "camera feed is out", "cameras are offline", "camera system offline",
+    "lost camera signal", "cameras stopped working", "camera display is blank", "monitor is black",
+    "no picture on cameras", "cameras showing nothing", "camera screen is blank", "nvr is down",
+    "nvr not working", "nvr system down", "video system down", "surveillance system down",
+    "security cameras down", "cctv down", "cctv not working", "cctv system offline",
+    "video feed is out", "lost video feed", "can't access cameras", "cant access cameras",
+    "camera system crashed", "cameras froze", "camera feed froze", "monitor froze",
+    "no video signal", "video signal lost", "cameras went black", "screen went black",
+    "all cameras are out", "some cameras are down", "half the cameras are out",
+    "cameras aren't showing", "cant pull up cameras", "camera system won't load",
+    "nvr won't connect", "cant connect to nvr", "lost connection to cameras",
+    "camera connection lost", "dvr isn't working", "dvr is down", "recording system down",
+    "video recorder down", "cameras aren't recording", "system isn't recording",
+    "how do i fix the cameras", "how do i get cameras back", "how do i restore camera feed",
+    "what do i do when cameras are down", "cameras need reset", "how do i reset cameras",
+    "how do i restart the nvr", "need to reboot cameras", "camera reboot needed",
+    "system needs restart", "how do i bring cameras back up", "how do i get video back",
+    "cameras are black screen", "nothing on the monitor", "monitor shows no signal",
+    "tv shows no cameras", "guard shack tv is blank", "cant see anything on screen",
+    "display is blank", "no image on cameras", "camera image is gone", "lost all camera views",
+    "view screens are blank", "surveillance is down", "security feed is out",
+    "camera monitors are dark", "the nvr isn't responding", "nvr is frozen", "system is frozen",
+    "camera software crashed", "dw system is down", "digital watchdog down",
+    "camera server is down", "cant access camera server", "server won't connect",
+    "cameras need troubleshooting", "camera troubleshooting needed", "video system needs fix",
+    "fix the camera system", "cameras require attention", "camera system failure",
+    "system failure cameras", "total camera loss", "complete camera outage",
+    "no visual on cameras", "visual feed lost", "cant monitor cameras", "monitoring system down",
+    "camera grid is blank", "all views are blank", "multi-view is blank", "camera layout is blank",
+    "guard view is blank", "cant see guard view", "layout won't load", "views won't display",
+    "camera channels are out", "all channels down", "channels aren't showing",
+    "cant switch camera views", "views aren't changing", "stuck on one camera",
+    "cameras won't cycle", "camera rotation stopped", "cameras are glitching",
+    "camera feed is glitchy", "video is pixelated", "cameras are fuzzy", "blurry camera feed",
+    "cameras are lagging", "video lag issue", "camera delay problem", "live feed isn't working",
+    "cant get live view", "real-time view is down", "cameras are static",
+    "getting static on cameras", "snow on camera screens", "blue screen on cameras",
+    "error message on cameras", "camera error display", "system error cameras",
+    "cameras show error", "camera malfunction alert", "alert cameras are down",
+    "warning camera system", "cameras just went out", "cameras suddenly stopped",
+    "video just cut out", "lost cameras just now", "cameras went down suddenly",
+    "immediate camera loss", "cameras failed just now", "just lost all cameras",
+    "camera system just failed", "cams down", "cameras out", "nvr down", "no cameras",
+    "cam feed out", "system down cameras", "cams not working", "monitor black", "no video"
+  ]
+};
+
+// ==========================================
+// FIRE PANEL RESET
+// ==========================================
+const FRUITVALE_FIRE_PANEL_SOP = {
+  title: "Fruitvale Fire Panel Reset",
+  site: "Fruitvale",
+  steps: [
+    {
+      stepNumber: 1,
+      instruction: "Press the system reset button once, then press and hold the same button until the text on the screen changes to 'SYSTEM RESET IN PROGRESS'",
+      userFriendly: "Okay, let's reset this. Press the system reset button once, then hold it down until the screen says 'SYSTEM RESET IN PROGRESS'. Text me when you see that.",
+      waitForConfirmation: true,
+      image: "fire-panel-step1.jpg"
+    },
+    {
+      stepNumber: 2,
+      instruction: "Wait until the screen says 'SYSTEM RESET COMPLETE'",
+      userFriendly: "Good. Now wait for the screen to say 'SYSTEM RESET COMPLETE'. This takes about a minute. Text 'done' when you see it.",
+      waitForConfirmation: true,
+      image: "fire-panel-step2.jpg"
+    },
+    {
+      stepNumber: 3,
+      instruction: "Press the 'Enter' button then press the 'C/Exit' button in order. The screen should say 'SYSTEM IS NORMAL'.",
+      userFriendly: "Almost done. Press these buttons IN ORDER:\n\n1. Enter\n2. C/Exit\n\nScreen should say 'SYSTEM IS NORMAL'. All good?",
+      waitForConfirmation: true,
+      image: "fire-panel-step3.jpg"
+    }
+  ],
+  
+  triggerPhrases: [
+    // Basic variations
+    "fire alarm",
+    "fire alarm won't stop",
+    "fire alarm wont stop",
+    "fire alarm is beeping",
+    "fire alarm beeping",
+    "fire panel beeping",
+    "fire panel is beeping",
+    "alarm won't stop",
+    "alarm wont stop",
+    "alarm is beeping",
+    "alarm beeping",
+    "fire panel won't stop",
+    "fire panel wont stop",
+    "beeping won't quit",
+    "beeping wont quit",
+    "alarm panel is beeping",
+    "alarm panel beeping",
+    
+    // Going off variations
+    "fire alarm going off",
+    "fire alarm is going off",
+    "fire panel is going off",
+    "fire panel going off",
+    "alarm going off",
+    "alarm is going off",
+    
+    // Reset variations
+    "reset fire alarm",
+    "reset the fire alarm",
+    "how do i reset fire alarm",
+    "how to reset fire alarm",
+    "fire alarm reset",
+    "fire panel reset",
+    "reset fire panel",
+    "need to reset fire alarm",
+    
+    // Stuck variations
+    "fire panel stuck",
+    "fire panel is stuck",
+    "fire alarm stuck",
+    "fire alarm is stuck",
+    "alarm stuck",
+    "alarm is stuck",
+    
+    // Other variations
+    "alarm panel",
+    "fire system alarm",
+    "fire alarm panel",
+    "alarm panel showing error",
+    "fire alarm error",
+    "fire panel error",
+    
+    // Urgent/casual
+    "fire alarm wont shut off",
+    "fire alarm won't shut off",
+    "cant stop fire alarm",
+    "can't stop fire alarm",
+    "fire alarm keeps going",
+    "alarm keeps beeping",
+    "help fire alarm",
+    "yo fire alarm going off"
+  ]
+};
+
+// ==========================================
+// ELECTRIC FENCE CONTROL
+// ==========================================
+const FRUITVALE_ELECTRIC_FENCE_SOP = {
+  title: "Fruitvale Electric Fence Activation/Deactivation",
+  site: "Fruitvale",
+  steps: [
+    {
+      stepNumber: 1,
+      instruction: "To ACTIVATE: Close all gates, unlock panel (code 510), enter 0297, press AWAY (button 2)",
+      userFriendly: "To turn ON the fence:\n\n1. Close all gates first\n2. Unlock panel: 510\n3. Enter: 0297\n4. Press AWAY (button 2)\n\nDone?",
+      waitForConfirmation: true
+    },
+    {
+      stepNumber: 2,
+      instruction: "To DEACTIVATE: Unlock panel (code 510), enter 0297, press OFF (button 1). Screen should say 'DISARMED READY TO ARM'",
+      userFriendly: "To turn OFF the fence:\n\n1. Unlock panel: 510\n2. Enter: 0297\n3. Press OFF (button 1)\n\nScreen should say 'DISARMED READY TO ARM'. All set?",
+      waitForConfirmation: true
+    }
+  ],
+  
+  triggerPhrases: [
+    // Basic
+    "electric fence",
+    "turn on fence",
+    "turn off fence",
+    "turn on the fence",
+    "turn off the fence",
+    "turn fence on",
+    "turn fence off",
+    
+    // Activate/deactivate
+    "activate fence",
+    "deactivate fence",
+    "activate the fence",
+    "deactivate the fence",
+    "activate electric fence",
+    "deactivate electric fence",
+    
+    // How to
+    "how do i turn on fence",
+    "how do i turn off fence",
+    "how to turn on fence",
+    "how to turn off fence",
+    "how do i activate fence",
+    "how do i deactivate fence",
+    
+    // Alarm
+    "fence alarm",
+    "fence is beeping",
+    "fence beeping",
+    "fence is alarming",
+    "electric fence alarm",
+    
+    // Code
+    "fence code",
+    "what's the fence code",
+    "whats the fence code",
+    "electric fence code",
+    "code for fence",
+    
+    // Panel
+    "fence panel",
+    "electric fence panel",
+    "fence control panel",
+    
+    // Perimeter
+    "perimeter fence",
+    "perimeter fence on",
+    "perimeter fence off",
+    
+    // Not working
+    "fence not working",
+    "fence isn't working",
+    "fence isnt working",
+    "fence won't turn on",
+    "fence wont turn on",
+    "fence won't turn off",
+    "fence wont turn off",
+    
+    // Arm/disarm
+    "how to arm fence",
+    "how to disarm fence",
+    "arm the fence",
+    "disarm the fence",
+    "arm fence",
+    "disarm fence",
+    
+    // On/off
+    "fence on",
+    "fence off",
+    "is fence on",
+    "is fence off",
+    
+    // Help
+    "help with fence",
+    "need help with fence"
+  ]
+};
+
+// ==========================================
+// ACCESS CONTROL REFERENCE
+// ==========================================
+const FRUITVALE_ACCESS_CONTROL_INFO = {
+  title: "Fruitvale Access Control Quick Reference",
+  site: "Fruitvale",
+  steps: [
+    {
+      stepNumber: 1,
+      instruction: "THREE ways to enter: (1) Manzanita badge scanned with Jibble app, (2) Valid ID + verify with tenant, (3) Tenant escort from gate",
+      userFriendly: "There are 3 ways to let someone in:\n\n1. Manzanita badge (scan with Jibble)\n2. Valid ID + call tenant to verify\n3. Tenant comes to gate and escorts them\n\nWhich situation do you have?",
+      waitForConfirmation: true
+    },
+    {
+      stepNumber: 2,
+      instruction: "FOR VISITORS WITH ID: Take ID, give visitor pass, log in visitor log (badge #, name, who visiting), CALL tenant to verify, then allow entry",
+      userFriendly: "If they give you ID:\n\n1. Take their ID\n2. Give visitor pass\n3. Log it (badge #, name, tenant)\n4. CALL tenant to verify (required)\n5. Let them in\n\nGot it?",
+      waitForConfirmation: true
+    },
+    {
+      stepNumber: 3,
+      instruction: "FOR VISITORS WITHOUT ID: They stay outside gate, they call their escort. If no escort number, you can help call from contact list. Escort must come get them.",
+      userFriendly: "If they WON'T give ID:\n\n1. They stay OUTSIDE\n2. They call their escort\n3. You can help call if needed\n4. Escort comes to gate to get them\n\nNo ID = No entry without escort!",
+      waitForConfirmation: true
+    },
+    {
+      stepNumber: 4,
+      instruction: "CONTRACTORS: Must have work order with correct address and Marie as contact. Call Marie to verify if unsure. Deny access if no work order.",
+      userFriendly: "For CONTRACTORS:\n\n1. Ask for work order\n2. Check: correct address + Marie listed\n3. Call Marie to verify if unsure\n4. NO work order = NO entry\n\nMake sense?",
+      waitForConfirmation: false
+    }
+  ],
+  
+  triggerPhrases: [
+    // Visitor won't show ID
+    "visitor won't show id",
+    "visitor wont show id",
+    "visitor doesn't have id",
+    "visitor doesnt have id",
+    "visitor won't give me id",
+    "visitor wont give me id",
+    "visitor refuses to show id",
+    "visitor refuses id",
+    "visitor refusing id",
+    
+    // No ID variations
+    "no id",
+    "they won't show id",
+    "they wont show id",
+    "won't show id",
+    "wont show id",
+    "refuses to show id",
+    "refusing to show id",
+    "no identification",
+    
+    // Check in questions
+    "how do i check in visitor",
+    "how to check in visitor",
+    "how do i check in a visitor",
+    "check in visitor",
+    "checking in visitor",
+    "visitor check in",
+    "visitor procedure",
+    "visitor protocol",
+    "visitor policy",
+    
+    // Access control general
+    "access control",
+    "access control policy",
+    "access control procedure",
+    "access procedure",
+    "access policy",
+    
+    // Someone at gate
+    "someone at gate",
+    "someone at the gate",
+    "person at gate",
+    "person at the gate",
+    "visitor at gate",
+    "visitor at the gate",
+    "people at gate",
+    
+    // Contractor variations
+    "contractor at gate",
+    "contractor here",
+    "contractor wants in",
+    "contractor at the gate",
+    "contractors at gate",
+    
+    // Delivery variations
+    "delivery at gate",
+    "delivery here",
+    "delivery person at gate",
+    "delivery at the gate",
+    
+    // Let someone in
+    "how do i let someone in",
+    "how to let someone in",
+    "can i let them in",
+    "should i let them in",
+    "do i let them in",
+    "let visitor in",
+    "letting someone in",
+    
+    // Gate access
+    "gate access",
+    "gate access policy",
+    "gate access procedure",
+    
+    // Who can come in
+    "who can come in",
+    "who can enter",
+    "who is allowed in",
+    "who can i let in",
+    
+    // Visitor rules
+    "visitor rules",
+    "visitor requirements",
+    
+    // Access rules
+    "access rules",
+    "entry rules",
+    "entry policy",
+    "entry procedure",
+    
+    // Questions
+    "visitor has no id",
+    "what if no id",
+    "visitor without id"
+  ]
+};
+
+// ==========================================
+// GATE ISSUES
+// ==========================================
+const FRUITVALE_GATE_ISSUES = {
+  title: "Fruitvale Gate Issues",
+  site: "Fruitvale",
+  steps: [
+    {
+      stepNumber: 1,
+      instruction: "Check if gate is stuck or if motor/chain is broken",
+      userFriendly: "Okay, let's figure out what's wrong. Is the gate:\n\nA) Stuck but motor running?\nB) Motor not running at all?\nC) Chain broken/fallen off?\n\nText A, B, or C",
+      waitForConfirmation: true
+    },
+    {
+      stepNumber: 2,
+      instruction: "If gate is stuck: Switch to manual operation using motor control box. If motor broken: Call Victor Maintenance immediately. If chain broken: Call Victor Maintenance immediately.",
+      userFriendly: "Here's what to do:\n\nIf STUCK: Switch gate to manual mode using the motor control box.\n\nIf MOTOR/CHAIN BROKEN: Call Victor Maintenance right now.\n\nGate currently blocking traffic?",
+      waitForConfirmation: true
+    },
+    {
+      stepNumber: 3,
+      instruction: "If site is vulnerable, manually secure access and escalate immediately",
+      userFriendly: "If yes - secure the entrance manually. Stay at the gate until relief arrives. I'm escalating this now.\n\nIf no - log the maintenance issue and continue monitoring.",
+      waitForConfirmation: false
+    }
+  ],
+  
+  triggerPhrases: [
+    // Basic not working
+    "gate isn't working",
+    "gate isnt working",
+    "gate is not working",
+    "gate not working",
+    "gates not working",
+    "gates aren't working",
+    "gates arent working",
+    
+    // Won't open/close
+    "gate won't open",
+    "gate wont open",
+    "gate won't close",
+    "gate wont close",
+    "can't open gate",
+    "cant open gate",
+    "can't close gate",
+    "cant close gate",
+    
+    // Stuck variations
+    "gate is stuck",
+    "gate stuck",
+    "gates stuck",
+    "gates are stuck",
+    "gate is jammed",
+    "gate jammed",
+    
+    // Broken variations
+    "gate is broken",
+    "gate broken",
+    "gates broken",
+    "gates are broken",
+    
+    // Problem/issue
+    "gate problem",
+    "gate issue",
+    "problem with gate",
+    "issue with gate",
+    "gate malfunction",
+    
+    // Won't move
+    "gate won't move",
+    "gate wont move",
+    "gates won't move",
+    
+    // Components
+    "gate motor",
+    "gate motor not working",
+    "gate motor broken",
+    "gate chain",
+    "gate chain broken",
+    "gate chain off",
+    
+    // With "the"
+    "the gate isn't working",
+    "the gate is stuck",
+    "the gate won't open",
+    "the gate is broken",
+    "the gates aren't working",
+    
+    // Questions
+    "gate down?",
+    "is gate working",
+    "is the gate working",
+    "what's wrong with gate",
+    "whats wrong with gate",
+    
+    // Urgent
+    "help gate stuck",
+    "gate emergency",
+    
+    // COMPREHENSIVE MANUAL GATE OPERATION TRIGGERS (150+ variations)
+    // Covering formal, rushed, vague, slang, and situational phrasing
+    
+    "how do i manually open the gate",
+    "how do i open the gate by hand",
+    "how do i get the gate open manually",
+    "what's the manual override for the gate",
+    "whats the manual override for the gate",
+    "how do i override the gate",
+    "gate won't open — how do i do it manually",
+    "gate wont open how do i do it manually",
+    "what's the manual process for opening the gate",
+    "whats the manual process for opening the gate",
+    "how do i open the arm manually",
+    "how do i lift the gate myself",
+    "is there a way to open the gate without power",
+    "power's out — how do i open the gate",
+    "powers out how do i open the gate",
+    "the gate is stuck — what's the manual way",
+    "the gate is stuck whats the manual way",
+    "how do i disengage the gate motor",
+    "how do i unlock the gate manually",
+    "how do i release the gate arm",
+    "where's the manual release for the gate",
+    "wheres the manual release for the gate",
+    "gate isn't responding — how do i open it myself",
+    "gate isnt responding how do i open it myself",
+    "how do i open the gate without the keypad",
+    "the remote isn't working — now what",
+    "the remote isnt working now what",
+    "what's the backup way to open the gate",
+    "whats the backup way to open the gate",
+    "how do i open it if the system's down",
+    "how do i open it if the systems down",
+    "how do i manually swing the gate open",
+    "can i open the gate by hand",
+    "is there a manual latch",
+    "where's the override switch",
+    "wheres the override switch",
+    "how do i bypass the motor",
+    "what do i do if the gate won't respond",
+    "what do i do if the gate wont respond",
+    "gate won't budge — what's next",
+    "gate wont budge whats next",
+    "how do i open the gate without electricity",
+    "how do i disengage the mechanism",
+    "the arm is stuck — how do i lift it",
+    "the arm is stuck how do i lift it",
+    "how do i reset and open the gate manually",
+    "is there a key to open the gate manually",
+    "where's the manual key slot",
+    "wheres the manual key slot",
+    "how do i put the gate in manual mode",
+    "how do i switch it to manual",
+    "how do i operate the gate without the system",
+    "the keypad's dead — how do i open it",
+    "the keypads dead how do i open it",
+    "how do i unlock the gate arm",
+    "gate motor failed — how do i open it",
+    "gate motor failed how do i open it",
+    "what's the manual release procedure",
+    "whats the manual release procedure",
+    "how do i force it open safely",
+    "how do i pop the gate open",
+    "what's the hand-open process",
+    "whats the hand-open process",
+    "how do i override the automatic system",
+    "how do i access the manual control",
+    "the control panel isn't working — now what",
+    "the control panel isnt working now what",
+    "how do i manually disengage the gate",
+    "how do i open the entry gate without power",
+    "how do i manually raise the barrier",
+    "gate is jammed — how do i open it",
+    "gate is jammed how do i open it",
+    "how do i pull the release",
+    "what do i do when the gate arm won't lift",
+    "what do i do when the gate arm wont lift",
+    "is there a backup key",
+    "where's the manual handle",
+    "wheres the manual handle",
+    "how do i unlock the barrier",
+    "how do i get vehicles through if it won't open",
+    "how do i get vehicles through if it wont open",
+    "how do i manually open the entrance",
+    "gate system down — what's the fix",
+    "gate system down whats the fix",
+    "how do i get the gate open right now",
+    "what's the emergency open procedure",
+    "whats the emergency open procedure",
+    "how do i open the gate in an emergency",
+    "how do i manually reset and open it",
+    "how do i unlock it without the system",
+    "how do i lift the arm",
+    "what's the step-by-step to open it manually",
+    "whats the step by step to open it manually",
+    "gate won't respond — instructions",
+    "gate wont respond instructions",
+    "what's the override process",
+    "whats the override process",
+    "how do i operate the gate manually",
+    "how do i take it out of auto mode",
+    "how do i unlock the control box",
+    "the gate arm won't move — what now",
+    "the gate arm wont move what now",
+    "how do i open it without the remote",
+    "what's the backup method to open it",
+    "whats the backup method to open it",
+    "how do i manually open the driveway gate",
+    "how do i manually open the arm gate",
+    "where is the manual release located",
+    "how do i manually release the motor",
+    "the gate's not responding — manual instructions",
+    "the gates not responding manual instructions",
+    "what do i press to override it",
+    "how do i unlock the barrier arm",
+    "is there a manual key for this",
+    "how do i open it if the power is cut",
+    "how do i manually operate the gate arm",
+    "what's the manual entry process",
+    "whats the manual entry process",
+    "how do i disengage auto mode",
+    "gate's stuck closed — help",
+    "gates stuck closed help",
+    "how do i open the security gate by hand",
+    "where do i access the release",
+    "what's the mechanical release process",
+    "whats the mechanical release process",
+    "how do i manually swing the gate",
+    "how do i open the barrier if it's offline",
+    "how do i open the barrier if its offline",
+    "the arm won't lift — what do i do",
+    "the arm wont lift what do i do",
+    "how do i manually bypass it",
+    "gate not opening — manual steps",
+    "gate not opening manual steps",
+    "how do i manually get access through the gate",
+    "the gate system froze — how do i open it",
+    "the gate system froze how do i open it",
+    "how do i unlock it physically",
+    "how do i put the gate into manual override",
+    "what's the emergency release method",
+    "whats the emergency release method",
+    "gate control box is dead — now what",
+    "gate control box is dead now what",
+    "how do i manually control the barrier",
+    "how do i open it without the button",
+    "what's the fail-safe way to open the gate",
+    "whats the fail safe way to open the gate",
+    "the entry arm is stuck — what's next",
+    "the entry arm is stuck whats next",
+    "how do i open it manually step-by-step",
+    "how do i open it manually step by step",
+    "the system's offline — how do i open the gate",
+    "the systems offline how do i open the gate",
+    "is there a manual backup option",
+    "how do i manually disengage the barrier arm",
+    "what's the manual gate access procedure",
+    "whats the manual gate access procedure",
+    "gate isn't moving — how do i override it",
+    "gate isnt moving how do i override it",
+    "how do i get the gate open if the panel's dead",
+    "how do i get the gate open if the panels dead",
+    "where's the emergency key",
+    "wheres the emergency key",
+    "how do i unlock the manual latch",
+    "how do i manually raise the entry arm",
+    "what's the manual release location",
+    "whats the manual release location",
+    "how do i open it when electronics fail",
+    "how do i get this gate open manually",
+    "what's the backup process for opening the gate",
+    "whats the backup process for opening the gate",
+    "the arm won't respond — manual steps",
+    "the arm wont respond manual steps",
+    "how do i bypass the automatic function",
+    "how do i manually open the site gate",
+    "how do i unlock the gate if the keypad is dead",
+    "how do i open the gate without access control",
+    "what's the physical override",
+    "whats the physical override",
+    "where is the override key kept",
+    "how do i manually access the property",
+    "how do i manually lift the security arm",
+    "what's the procedure if the gate won't open",
+    "whats the procedure if the gate wont open",
+    "how do i release the motor clutch",
+    "the gate is unresponsive — what's the manual way",
+    "the gate is unresponsive whats the manual way",
+    "how do i operate the gate manually during outage",
+    "what's the fallback to open the gate",
+    "whats the fallback to open the gate",
+    "how do i manually disengage the lock",
+    "gate control is down — how do i open it",
+    "gate control is down how do i open it",
+    "how do i open it physically",
+    "what's the hand-release process",
+    "whats the hand release process",
+    "how do i manually free the barrier",
+    "how do i open the gate without the system running",
+    "how do i override the entry arm",
+    "what do i do if the gate won't lift",
+    "what do i do if the gate wont lift",
+    "how do i manually activate the release",
+    "is there a manual way to open this gate",
+    "where do i find the manual release key",
+    "how do i open the gate if it's locked up",
+    "how do i open the gate if its locked up",
+    "how do i disengage the automatic motor",
+    "what's the emergency open steps",
+    "whats the emergency open steps",
+    "how do i manually get the arm up",
+    "the gate's frozen — what's the manual fix",
+    "the gates frozen whats the manual fix",
+    "how do i open this gate without power",
+    
+    // Shortened/casual variations
+    "manual gate open",
+    "open gate manual",
+    "gate manual mode",
+    "manual override gate",
+    "bypass gate motor"
+  ]
+};
+
+// ==========================================
+// GENERAL HELP / CONFUSED
+// ==========================================
+const FRUITVALE_GENERAL_HELP = {
+  title: "General Assistance",
+  site: "Fruitvale",
+  steps: [
+    {
+      stepNumber: 1,
+      instruction: "Gather situation details from guard",
+      userFriendly: "No problem. Tell me what's going on in one sentence. What do you need help with?",
+      waitForConfirmation: true
+    },
+    {
+      stepNumber: 2,
+      instruction: "Escalate to supervisor with context",
+      userFriendly: "Got it. I'm connecting you with your supervisor now. They'll reach out in a few minutes.",
+      waitForConfirmation: false
+    }
+  ],
+  
+  triggerPhrases: [
+    // ONLY general confusion/help phrases (NOT handbook questions)
+    // Handbook questions will be answered by Claude AI with company knowledge
+    
+    // Don't know what to do
+    "i don't know what to do", "i dont know what to do", "don't know what to do",
+    "dont know what to do", "not sure what to do", "im not sure what to do",
+    "i'm not sure what to do", "no idea what to do",
+    
+    // Confused
+    "i'm confused", "im confused", "confused", "very confused", "really confused",
+    "totally confused",
+    
+    // Lost
+    "i'm lost", "im lost", "lost", "feel lost",
+    
+    // Need help general (but vague - no specific topic)
+    "need help", "i need help", "help me", "can you help me", "can someone help",
+    "need some help", "need assistance",
+    
+    // What do I do (vague)
+    "what do i do", "what should i do", "what am i supposed to do",
+    "what do i do now", "what should i do now",
+    
+    // Unsure
+    "unsure", "i'm unsure", "im unsure", "not sure",
+    
+    // Stuck
+    "stuck", "i'm stuck", "im stuck", "really stuck",
+    
+    // Help general (vague)
+    "help", "help!", "help please", "i need help please", "can i get help",
+    
+    // Questions (vague)
+    "what now", "what next", "now what", "what's next", "whats next"
+  ]
+};
+
+module.exports = { 
   FRUITVALE_NVR_SOP,
   FRUITVALE_FIRE_PANEL_SOP,
   FRUITVALE_ELECTRIC_FENCE_SOP,
   FRUITVALE_ACCESS_CONTROL_INFO,
   FRUITVALE_GATE_ISSUES,
   FRUITVALE_GENERAL_HELP
-} = require('./knowledge-base');
-const { COMPANY_KNOWLEDGE } = require('./company-knowledge');
-
-const app = express();
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json());
-app.use('/images', express.static('images'));
-
-// Initialize services
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-
-// Email setup
-const emailTransporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD
-  }
-});
-
-// In-memory conversation state
-const conversationState = new Map();
-
-// Track when we last sent an abandonment alert for each guard
-const abandonmentAlertsSent = new Map();
-
-// DAILY DIGEST: Store completed/escalated tasks for 6am summary email
-const dailyTasks = {
-  resolved: [],
-  escalated: [],
-  abandoned: []
 };
-
-// DAILY DIGEST: Send summary email at 6am Pacific every day
-function scheduleDailyDigest() {
-  setInterval(() => {
-    const now = new Date();
-    const pacificTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
-    const hour = pacificTime.getHours();
-    const minute = pacificTime.getMinutes();
-    
-    // Send at 6:00 AM Pacific (check every minute)
-    if (hour === 6 && minute === 0) {
-      sendDailyDigestEmail();
-    }
-  }, 60 * 1000); // Check every minute
-}
-
-// DAILY DIGEST: Send the summary email
-async function sendDailyDigestEmail() {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-    console.log('Email not configured - skipping daily digest');
-    return;
-  }
-  
-  const totalTasks = dailyTasks.resolved.length + dailyTasks.escalated.length + dailyTasks.abandoned.length;
-  
-  // Don't send if no activity
-  if (totalTasks === 0) {
-    console.log('📧 No tasks yesterday - skipping daily digest');
-    dailyTasks.resolved = [];
-    dailyTasks.escalated = [];
-    dailyTasks.abandoned = [];
-    return;
-  }
-  
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const dateStr = yesterday.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  
-  const subject = `WatchTower Daily Summary - ${dateStr}`;
-  
-  let htmlContent = `
-    <h2>📊 WatchTower Daily Summary</h2>
-    <p><strong>Activity from:</strong> ${dateStr}</p>
-    <hr>
-  `;
-  
-  // RESOLVED TASKS
-  if (dailyTasks.resolved.length > 0) {
-    htmlContent += `
-      <h3>✅ RESOLVED TASKS (${dailyTasks.resolved.length})</h3>
-      <ul>
-    `;
-    dailyTasks.resolved.forEach(task => {
-      const guardLast4 = task.guardPhone.slice(-4);
-      const stepCount = task.steps.length;
-      htmlContent += `
-        <li><strong>${task.issue}</strong> - Guard ending in ${guardLast4} - ${task.time} - ${stepCount} steps completed</li>
-      `;
-    });
-    htmlContent += `</ul><br>`;
-  }
-  
-  // ESCALATED TASKS
-  if (dailyTasks.escalated.length > 0) {
-    htmlContent += `
-      <h3>⚠️ ESCALATED TASKS (${dailyTasks.escalated.length})</h3>
-      <ul>
-    `;
-    dailyTasks.escalated.forEach(task => {
-      const guardLast4 = task.guardPhone.slice(-4);
-      htmlContent += `
-        <li><strong>${task.issue}</strong> - Guard ending in ${guardLast4} - ${task.time} - ${task.reason}</li>
-      `;
-    });
-    htmlContent += `</ul><br>`;
-  }
-  
-  // ABANDONED TASKS
-  if (dailyTasks.abandoned.length > 0) {
-    htmlContent += `
-      <h3>⏰ ABANDONED TASKS (${dailyTasks.abandoned.length})</h3>
-      <ul>
-    `;
-    dailyTasks.abandoned.forEach(task => {
-      const guardLast4 = task.guardPhone.slice(-4);
-      htmlContent += `
-        <li><strong>${task.issue}</strong> - Guard ending in ${guardLast4} - ${task.time} - Guard went silent at step ${task.step}</li>
-      `;
-    });
-    htmlContent += `</ul><br>`;
-  }
-  
-  htmlContent += `
-    <hr>
-    <p><strong>TOTAL:</strong> ${totalTasks} incidents handled yesterday</p>
-  `;
-  
-  try {
-    await emailTransporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: CONFIG.OWNER_EMAIL,
-      subject: subject,
-      html: htmlContent
-    });
-    console.log(`📧 Daily digest sent: ${totalTasks} tasks from ${dateStr}`);
-    
-    // Clear the arrays for today
-    dailyTasks.resolved = [];
-    dailyTasks.escalated = [];
-    dailyTasks.abandoned = [];
-  } catch (error) {
-    console.error('Error sending daily digest:', error);
-  }
-}
-
-// Start the daily digest scheduler
-scheduleDailyDigest();
-
-// Check for abandoned conversations every 2 minutes
-setInterval(() => {
-  const now = Date.now();
-  const EIGHT_MINUTES = 8 * 60 * 1000; // 8 minutes in milliseconds
-  
-  conversationState.forEach((state, guardPhone) => {
-    if (!state.active || !state.lastActivity) return;
-    
-    const timeSinceActivity = now - state.lastActivity;
-    const alreadyAlerted = abandonmentAlertsSent.get(guardPhone);
-    
-    // If inactive for 8+ minutes and we haven't alerted yet
-    if (timeSinceActivity >= EIGHT_MINUTES && !alreadyAlerted) {
-      console.log(`⚠️ Guard ${guardPhone} went silent for 8+ minutes at Step ${state.currentStep}`);
-      
-      // Send alert email
-      sendAbandonmentAlert(guardPhone, state.issue, state.currentStep, state.completedSteps);
-      
-      // Mark as alerted so we don't spam
-      abandonmentAlertsSent.set(guardPhone, true);
-    }
-  });
-}, 2 * 60 * 1000); // Check every 2 minutes
-
-// Configuration
-const CONFIG = {
-  TWILIO_PHONE: process.env.TWILIO_PHONE_NUMBER,
-  WHATSAPP_MODE: process.env.WHATSAPP_MODE === 'true',
-  SUPERVISOR_PHONE: process.env.SUPERVISOR_PHONE || '+1234567890',
-  OWNER_EMAIL: process.env.OWNER_EMAIL,
-  SERVER_URL: process.env.SERVER_URL || 'http://localhost:3000',
-  MAX_RETRIES: 2
-};
-
-// All available SOPs
-const ALL_SOPS = [
-  FRUITVALE_NVR_SOP,
-  FRUITVALE_FIRE_PANEL_SOP,
-  FRUITVALE_ELECTRIC_FENCE_SOP,
-  FRUITVALE_ACCESS_CONTROL_INFO,
-  FRUITVALE_GATE_ISSUES,
-  FRUITVALE_GENERAL_HELP
-];
-
-// Detect which SOP is needed
-function detectSOP(message) {
-  const lowerMessage = message.toLowerCase();
-  
-  for (const sop of ALL_SOPS) {
-    const matches = sop.triggerPhrases.some(phrase => 
-      lowerMessage.includes(phrase.toLowerCase())
-    );
-    
-    if (matches) {
-      return { sop, issue: sop.title };
-    }
-  }
-  
-  return null;
-}
-
-// Check if asking for supervisor/escalation
-function isEscalationRequest(message) {
-  const escalationPhrases = [
-    'supervisor', 'manager', 'boss', 'escalate', 
-    'need help', 'call someone', 'get someone',
-    'i need someone', 'someone help', 'can someone help'
-  ];
-  const lowerMessage = message.toLowerCase().trim();
-  return escalationPhrases.some(phrase => lowerMessage.includes(phrase));
-}
-
-// Send SMS/MMS (or WhatsApp)
-async function sendSMS(to, message, imageUrl = null) {
-  try {
-    const toNumber = CONFIG.WHATSAPP_MODE ? `whatsapp:${to}` : to;
-    const fromNumber = CONFIG.WHATSAPP_MODE ? `whatsapp:${CONFIG.TWILIO_PHONE}` : CONFIG.TWILIO_PHONE;
-    
-    const messageData = {
-      body: message,
-      from: fromNumber,
-      to: toNumber
-    };
-    
-    if (imageUrl) {
-      messageData.mediaUrl = [imageUrl];
-    }
-    
-    await twilioClient.messages.create(messageData);
-    console.log(`${imageUrl ? 'MMS' : CONFIG.WHATSAPP_MODE ? 'WhatsApp' : 'SMS'} sent to ${to}: ${message.substring(0, 50)}...`);
-  } catch (error) {
-    console.error('Error sending message:', error);
-  }
-}
-
-// Send email report
-async function sendEmailReport(guardPhone, issue, resolved, steps) {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-    console.log('Email not configured - skipping report');
-    return;
-  }
-  
-  const status = resolved ? 'RESOLVED ✅' : 'ESCALATED ⚠️';
-  const subject = `WatchTower Report: ${issue} - ${status}`;
-  
-  const htmlContent = `
-    <h2>WatchTower Incident Report</h2>
-    <p><strong>Status:</strong> ${status}</p>
-    <p><strong>Guard Phone:</strong> ${guardPhone}</p>
-    <p><strong>Issue:</strong> ${issue}</p>
-    <p><strong>Date/Time:</strong> ${new Date().toLocaleString()}</p>
-    <hr>
-    <h3>Steps Completed:</h3>
-    <ul>
-      ${steps.map(step => `<li>Step ${step.stepNumber}: ${step.instruction}</li>`).join('')}
-    </ul>
-    ${!resolved ? '<p><strong>⚠️ Issue was escalated to supervisor.</strong></p>' : ''}
-  `;
-
-  try {
-    await emailTransporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: CONFIG.OWNER_EMAIL,
-      subject: subject,
-      html: htmlContent
-    });
-    console.log(`Email report sent for ${issue}`);
-  } catch (error) {
-    console.error('Error sending email:', error);
-  }
-}
-
-// Escalate to supervisor
-async function escalateToSupervisor(guardPhone, issue, currentStep, additionalContext = '') {
-  const contextInfo = additionalContext ? `\n\nContext: ${additionalContext}` : '';
-  const escalationMessage = `🚨 Guard at ${guardPhone} needs help with: ${issue}\n\nThey're stuck at Step ${currentStep}.${contextInfo}\n\nPlease contact them ASAP.`;
-  
-  await sendSMS(CONFIG.SUPERVISOR_PHONE, escalationMessage);
-  await sendSMS(guardPhone, "Connecting you with your supervisor. They'll reach out shortly.");
-  
-  const state = conversationState.get(guardPhone);
-  await sendEmailReport(guardPhone, issue, false, state.completedSteps || []);
-  
-  console.log(`Escalated issue for ${guardPhone}: ${issue}`);
-}
-
-// Send abandonment alert (guard went silent mid-procedure) - IMMEDIATE EMAIL
-async function sendAbandonmentAlert(guardPhone, issue, currentStep, completedSteps) {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-    console.log('Email not configured - skipping abandonment alert');
-    return;
-  }
-  
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  
-  // Store for daily digest
-  dailyTasks.abandoned.push({
-    guardPhone,
-    issue,
-    step: currentStep,
-    time: timeStr,
-    timestamp: now
-  });
-  
-  // Send IMMEDIATE email (guard going dark is urgent!)
-  const subject = `⚠️ WatchTower Alert: Guard Went Silent - ${issue}`;
-  
-  const htmlContent = `
-    <h2>⚠️ WatchTower Abandonment Alert</h2>
-    <p><strong>Status:</strong> Guard went silent mid-procedure (8+ minutes no response)</p>
-    <p><strong>Guard Phone:</strong> ${guardPhone}</p>
-    <p><strong>Issue:</strong> ${issue}</p>
-    <p><strong>Last Active Step:</strong> ${currentStep}</p>
-    <p><strong>Time:</strong> ${now.toLocaleString()}</p>
-    <hr>
-    <h3>Steps Completed Before Going Silent:</h3>
-    <ul>
-      ${completedSteps.map(step => `<li>Step ${step.stepNumber}: ${step.instruction}</li>`).join('')}
-    </ul>
-    <p><strong>⚠️ Action Needed:</strong> Guard may be stuck, distracted, or need assistance. Consider reaching out to check on them.</p>
-  `;
-
-  try {
-    await emailTransporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: CONFIG.OWNER_EMAIL,
-      subject: subject,
-      html: htmlContent
-    });
-    console.log(`📧 IMMEDIATE abandonment alert sent for ${guardPhone} at Step ${currentStep}`);
-  } catch (error) {
-    console.error('Error sending abandonment alert:', error);
-  }
-}
-
-// ==========================================
-// CAUTIOUS AI INTENT ANALYZER
-// ==========================================
-
-// Smart "Cautious" Intent Analyzer with Skip Detection
-async function analyzeGuardIntent(message, currentStepInfo, issueTitle) {
-  const systemPrompt = `
-You are a cautious security supervisor overseeing a troubleshooting procedure.
-
-CONTEXT:
-- Issue: "${issueTitle}"
-- Current Step: ${currentStepInfo.stepNumber} - "${currentStepInfo.instruction}"
-- User's Message: "${message}"
-
-YOUR GOAL:
-Classify the user's intent into exactly ONE of these categories:
-
-1. SOLVED: User explicitly states the *entire issue* is fixed (e.g., "Cameras are back up," "Alarm stopped," "System working").
-
-2. NEXT: User confirmed they completed the *current step* only (e.g., "Done," "Plugged it in," "I'm there," "Ready").
-
-3. STUCK: User says it didn't work, is confused, or asks a question about the current step.
-
-4. ESCALATE: User is frustrated, angry, or explicitly asking for a human/supervisor.
-
-5. CLARIFY: User's response is vague (e.g., "It worked," "Good," "Okay," "It's on"). Unclear if they mean the *step* worked or the *whole system* is fixed.
-
-6. SKIP: User indicates they are already past the current step (e.g., "I'm already in the room," "I'm looking at the monitor," "Skip to X").
-
-CRITICAL RULES:
-- Be Conservative: If user says "It worked" or "Good", return CLARIFY
-- Only return SOLVED if they explicitly mention the original problem being fixed
-- Return SKIP only if they clearly indicate being past the current step
-
-Reply ONLY with the category word (SOLVED, NEXT, STUCK, ESCALATE, CLARIFY, or SKIP).
-`;
-
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-3-haiku-20240307', // Fast and cheap
-      max_tokens: 10,
-      messages: [{ role: 'user', content: message }],
-      system: systemPrompt
-    });
-    
-    const intent = response.content[0].text.trim().toUpperCase();
-    console.log(`🧠 AI Intent: ${intent} for: "${message}"`);
-    return intent;
-
-  } catch (error) {
-    console.error('AI Analysis Failed:', error);
-    return 'NEXT'; // Safe fallback: assume step complete
-  }
-}
-
-// Determine which step guard is at (when they SKIP ahead)
-async function determineCurrentLocation(message, allSteps, issueTitle) {
-  const stepDescriptions = allSteps.map((s, i) => 
-    `Step ${i + 1}: ${s.instruction}`
-  ).join('\n');
-  
-  const systemPrompt = `
-The user is troubleshooting: "${issueTitle}"
-
-Here are all the steps in order:
-${stepDescriptions}
-
-The user just said: "${message}"
-
-Based on their message, which step number are they currently at or ready to start?
-
-Reply ONLY with the step number (just the number, nothing else).
-If unclear, reply with "1".
-`;
-
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-3-haiku-20240307',
-      max_tokens: 5,
-      messages: [{ role: 'user', content: message }],
-      system: systemPrompt
-    });
-    
-    const stepNum = parseInt(response.content[0].text.trim());
-    console.log(`🎯 Determined location: Step ${stepNum}`);
-    return isNaN(stepNum) ? 1 : stepNum;
-
-  } catch (error) {
-    console.error('Location determination failed:', error);
-    return 1; // Default to step 1
-  }
-}
-
-// ==========================================
-// MAIN CONVERSATION HANDLER (CAUTIOUS + SKIP)
-// ==========================================
-
-async function handleConversation(guardPhone, message) {
-  let state = conversationState.get(guardPhone) || {
-    active: false,
-    currentStep: 0,
-    issue: null,
-    activeSOP: null,
-    retries: 0,
-    completedSteps: [],
-    startTime: null,
-    conversationHistory: []
-  };
-
-  // Add to conversation history
-  state.conversationHistory = state.conversationHistory || [];
-  state.conversationHistory.push({ role: 'guard', content: message });
-
-  // Check for escalation request at any time
-  if (isEscalationRequest(message) && state.active) {
-    await escalateToSupervisor(guardPhone, state.issue, state.currentStep, message);
-    conversationState.delete(guardPhone);
-    abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
-    return null;
-  }
-
-  // NEW CONVERSATION - Detect issue
-  if (!state.active) {
-    const detected = detectSOP(message);
-    
-    if (detected) {
-      state = {
-        active: true,
-        currentStep: 1,
-        issue: detected.issue,
-        activeSOP: detected.sop,
-        retries: 0,
-        completedSteps: [],
-        startTime: new Date(),
-        lastActivity: Date.now(), // Track last activity for abandonment detection
-        conversationHistory: [{ role: 'guard', content: message }]
-      };
-      conversationState.set(guardPhone, state);
-      abandonmentAlertsSent.delete(guardPhone); // Clear any previous alert flag
-      
-      const firstStep = detected.sop.steps[0];
-      const imageUrl = firstStep.image ? `${CONFIG.SERVER_URL}/images/${firstStep.image}` : null;
-      
-      state.conversationHistory.push({ role: 'watchtower', content: firstStep.userFriendly });
-      await sendSMS(guardPhone, firstStep.userFriendly, imageUrl);
-      return null;
-    } else {
-      // General question - use Claude AI with company knowledge
-      try {
-        const systemPrompt = `You are WatchTower, a helpful SMS assistant for Manzanita Security guards.
-
-${COMPANY_KNOWLEDGE}
-
-RESPONSE RULES:
-- Keep responses SHORT (2-3 sentences max)
-- Be DIRECTIVE ("Do this" not "You might want to...")
-- Use the company knowledge above to give accurate answers
-- If you don't know, say "Contact Emma (510-612-4813) or Chris (925-922-1067) about that"
-- Sound like a calm supervisor, not a chatbot
-- Be professional but friendly`;
-
-        const response = await anthropic.messages.create({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 300,
-          messages: [{ role: 'user', content: message }],
-          system: systemPrompt
-        });
-        
-        return response.content[0].text;
-      } catch (error) {
-        console.error('Claude API error:', error);
-        return "I'm having trouble right now. Text your supervisor.";
-      }
-    }
-  }
-
-  // ACTIVE TROUBLESHOOTING - Use intelligent interpretation
-  if (state.active && state.activeSOP) {
-    // Update last activity timestamp (for abandonment detection)
-    state.lastActivity = Date.now();
-    conversationState.set(guardPhone, state);
-    
-    const currentStepObj = state.activeSOP.steps[state.currentStep - 1];
-    
-    // 🧠 ASK AI TO INTERPRET INTENT
-    const intent = await analyzeGuardIntent(
-      message, 
-      currentStepObj, 
-      state.issue
-    );
-
-    // CASE 1: SOLVED (Problem fixed early!) ✅
-    if (intent === 'SOLVED') {
-       state.completedSteps.push(currentStepObj);
-       await sendEmailReport(guardPhone, state.issue, true, state.completedSteps);
-       conversationState.delete(guardPhone);
-       abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
-       
-       await sendSMS(guardPhone, "Great work! I've marked this as RESOLVED. Have a safe shift. ✅");
-       return null;
-    }
-
-    // CASE 2: CLARIFY (The Conservative Check) ⚠️
-    if (intent === 'CLARIFY') {
-        conversationState.set(guardPhone, state);
-        await sendSMS(guardPhone, "Just to be sure: did that fix the WHOLE problem, or are you just ready for the next step?\n\n(Text 'Fixed' if done, or 'Next' to continue)");
-        return null;
-    }
-
-    // CASE 3: SKIP (Jump ahead) ⏭️
-    if (intent === 'SKIP') {
-        // Determine where they actually are
-        const detectedStep = await determineCurrentLocation(
-          message, 
-          state.activeSOP.steps, 
-          state.issue
-        );
-        
-        if (detectedStep > state.currentStep && detectedStep <= state.activeSOP.steps.length) {
-          // They're ahead - jump to that step
-          console.log(`⏭️ Skipping from Step ${state.currentStep} to Step ${detectedStep}`);
-          state.currentStep = detectedStep;
-          
-          const jumpStep = state.activeSOP.steps[state.currentStep - 1];
-          const imageUrl = jumpStep.image ? `${CONFIG.SERVER_URL}/images/${jumpStep.image}` : null;
-          
-          state.conversationHistory.push({ role: 'watchtower', content: jumpStep.userFriendly });
-          conversationState.set(guardPhone, state);
-          
-          await sendSMS(guardPhone, `Got it! ${jumpStep.userFriendly}`, imageUrl);
-          return null;
-        }
-        // If can't determine location, fall through to NEXT
-    }
-
-    // CASE 4: ESCALATE 🚨
-    if (intent === 'ESCALATE') {
-       await escalateToSupervisor(guardPhone, state.issue, state.currentStep, message);
-       conversationState.delete(guardPhone);
-       abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
-       return null;
-    }
-
-    // CASE 5: STUCK 🤔
-    if (intent === 'STUCK') {
-       state.retries += 1;
-       if (state.retries >= CONFIG.MAX_RETRIES) {
-         await escalateToSupervisor(guardPhone, state.issue, state.currentStep, "Guard stuck on step");
-         conversationState.delete(guardPhone);
-         abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
-         return null;
-       }
-       conversationState.set(guardPhone, state);
-       await sendSMS(guardPhone, `Let's try again:\n\n${currentStepObj.instruction}\n\n(Still stuck? Text 'supervisor')`);
-       return null;
-    }
-
-    // CASE 6: NEXT (Default - Step Complete) ➡️
-    state.completedSteps.push(currentStepObj);
-    state.retries = 0;
-    state.currentStep += 1;
-    
-    // Check if finished all steps
-    if (state.currentStep > state.activeSOP.steps.length) {
-      await sendEmailReport(guardPhone, state.issue, true, state.completedSteps);
-      conversationState.delete(guardPhone);
-      abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
-      await sendSMS(guardPhone, "🎉 All steps complete. Great job! Marking as resolved.");
-      return null;
-    }
-    
-    // Send next step
-    const nextStep = state.activeSOP.steps[state.currentStep - 1];
-    const imageUrl = nextStep.image ? `${CONFIG.SERVER_URL}/images/${nextStep.image}` : null;
-    
-    state.conversationHistory.push({ role: 'watchtower', content: nextStep.userFriendly });
-    conversationState.set(guardPhone, state);
-    
-    await sendSMS(guardPhone, nextStep.userFriendly, imageUrl);
-    return null;
-  }
-}
-
-// Twilio webhook (handles both SMS and WhatsApp)
-app.post('/sms', async (req, res) => {
-  const guardPhone = req.body.From.replace('whatsapp:', '');
-  const message = req.body.Body;
-  
-  console.log(`📱 Received from ${guardPhone}: ${message}`);
-  
-  try {
-    const response = await handleConversation(guardPhone, message);
-    
-    if (response) {
-      const twiml = new twilio.twiml.MessagingResponse();
-      twiml.message(response);
-      res.type('text/xml').send(twiml.toString());
-      console.log(`📤 Response sent: ${response.substring(0, 50)}...`);
-    } else {
-      res.sendStatus(200);
-    }
-  } catch (error) {
-    console.error('❌ Error:', error);
-    const twiml = new twilio.twiml.MessagingResponse();
-    twiml.message("Sorry, I'm having technical difficulties. Text your supervisor.");
-    res.type('text/xml').send(twiml.toString());
-  }
-});
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'WatchTower is running!', 
-    version: '2.3-Abandonment',
-    activeConversations: conversationState.size,
-    availableSOPs: ALL_SOPS.length,
-    companyKnowledge: 'Loaded',
-    aiMode: 'Cautious + Skip',
-    abandonmentDetection: '8 minutes'
-  });
-});
-
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`\n🗼 WatchTower v2.3-Abandonment is running on port ${PORT}`);
-  console.log(`📱 Webhook URL: ${CONFIG.SERVER_URL}/sms`);
-  console.log(`📞 ${CONFIG.WHATSAPP_MODE ? 'WhatsApp' : 'Twilio Phone'}: ${CONFIG.TWILIO_PHONE}`);
-  console.log(`🧠 AI Mode: Cautious Intent Analysis (SOLVED/NEXT/STUCK/ESCALATE/CLARIFY/SKIP)`);
-  console.log(`⏰ Abandonment Detection: Alerts after 8 minutes of silence`);
-  console.log(`📚 Available SOPs: ${ALL_SOPS.length}`);
-  console.log(`📖 Company Handbook: Loaded`);
-  console.log(`\n--- SOPs Loaded ---`);
-  ALL_SOPS.forEach(sop => console.log(`   ✓ ${sop.title}`));
-  console.log(`-------------------\n`);
-});
