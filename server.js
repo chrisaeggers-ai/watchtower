@@ -38,6 +38,10 @@ const conversationState = new Map();
 // Track when we last sent an abandonment alert for each guard
 const abandonmentAlertsSent = new Map();
 
+// 🔔 PROACTIVE CHECK-INS: Track last contact time per guard
+const guardLastContact = new Map();
+const checkInsSent = new Map(); // Track which guards we've checked in with
+
 // DAILY DIGEST: Store completed/escalated tasks for 6am summary email
 const dailyTasks = {
   resolved: [],
@@ -49,6 +53,7 @@ const dailyTasks = {
 const weeklyAnalytics = {
   incidents: [],          // All incidents with full metadata
   unrecognizedPhrases: [], // Messages that didn't trigger SOPs
+  checkIns: [],           // Proactive check-in data
   startDate: new Date(),   // Week start
   lastWeekBaseline: {      // Previous week's data for comparison
     cameraCount: 0,
@@ -58,6 +63,272 @@ const weeklyAnalytics = {
     accessCount: 0
   }
 };
+
+// Store check-in for analytics
+function logCheckIn(guardPhone, responded, responseTime = null) {
+  weeklyAnalytics.checkIns.push({
+    guardPhone,
+    timestamp: new Date(),
+    responded,
+    responseTime // in seconds, null if no response
+  });
+}
+
+// 🔔 PROACTIVE SITE CHECKS: Track guard contact and perform equipment checks
+const guardLastContact = new Map();
+const guardNextCheck = new Map(); // When to send next check (randomized)
+const lastCheckQuestion = new Map(); // Avoid repeating same question
+const pendingChecks = new Map(); // Track unanswered checks
+const proactiveCheckStats = {
+  sent: 0,
+  responses: 0,
+  issuesDetected: 0,
+  bySystem: {
+    camera: { sent: 0, passed: 0, issues: 0 },
+    gate: { sent: 0, passed: 0, issues: 0 },
+    firePanel: { sent: 0, passed: 0, issues: 0 },
+    electricFence: { sent: 0, passed: 0, issues: 0 },
+    accessControl: { sent: 0, passed: 0, issues: 0 },
+    general: { sent: 0, passed: 0, issues: 0 }
+  }
+};
+
+// Get random check interval (90 min, 2 hrs, 3 hrs, or 4 hrs)
+function getRandomCheckInterval() {
+  const intervals = [
+    90 * 60 * 1000,   // 90 minutes
+    120 * 60 * 1000,  // 2 hours
+    180 * 60 * 1000,  // 3 hours
+    240 * 60 * 1000   // 4 hours
+  ];
+  return intervals[Math.floor(Math.random() * intervals.length)];
+}
+
+// 30 variations per system - prevents message fatigue! (180 total questions)
+const PROACTIVE_CHECKS = {
+  camera: [
+    "Quick check: Cameras still clear?", "All camera feeds looking good?", "Monitor showing all cameras?",
+    "How are the cameras looking?", "Video feeds all good?", "Cameras operating normally?",
+    "All views clear on the monitor?", "Camera system good?", "Can you see all the cameras?",
+    "NVR showing everything?", "Camera check - all clear?", "Video quality looking good?",
+    "All camera angles visible?", "Monitor display normal?", "Cameras still up?",
+    "Any camera issues?", "Video system running smooth?", "All cameras online?",
+    "Surveillance system good?", "Picture quality good on all cameras?", "All feeds recording?",
+    "Camera grid showing everything?", "DW system looking normal?", "Guard view clear?",
+    "All camera zones visible?", "Video feeds clear?", "No camera problems?",
+    "Cameras working as they should?", "Visual on all cameras?", "Everything showing up on screens?"
+  ],
+  gate: [
+    "Gate operating smoothly?", "Gate opening/closing normally?", "Any gate issues?",
+    "Gate working properly?", "How's the gate running?", "Gate system good?",
+    "Entry gate functioning normally?", "Gate arm moving smoothly?", "Any problems with the gate?",
+    "Gate responding to controls?", "Gate motor sound normal?", "Vehicle gate operating OK?",
+    "Gate opening cleanly?", "Any gate delays?", "Gate closing all the way?",
+    "Access gate working?", "Gate running smoothly tonight?", "Gate mechanism good?",
+    "Any gate sticking?", "Gate control responsive?", "Gate movement normal?",
+    "Entry system working?", "Gate barrier operating normally?", "Any gate malfunctions?",
+    "Gate cycling properly?", "Vehicle access smooth?", "Gate arm functioning?",
+    "Gate operating as it should?", "No gate trouble?", "Gate system running well?"
+  ],
+  firePanel: [
+    "Fire panel quiet?", "Fire alarm panel normal?", "Any beeping from fire panel?",
+    "Fire system good?", "Fire panel showing normal?", "Alarm panel quiet?",
+    "Fire alarm status normal?", "Any fire alarm alerts?", "Fire panel displaying normal?",
+    "Alarm system quiet?", "Fire panel lights normal?", "Any fire panel warnings?",
+    "Fire alarm panel clear?", "No fire panel issues?", "Fire system status good?",
+    "Panel showing all green?", "Fire alarm in normal mode?", "Any fire panel faults?",
+    "Fire detection system good?", "Alarm panel functioning normally?", "Fire panel trouble-free?",
+    "Any fire system alerts?", "Fire panel display clear?", "Alarm status normal?",
+    "Fire panel reading normal?", "No fire alarm activity?", "Fire safety system good?",
+    "Panel in ready state?", "Fire alarm all clear?", "Any panel indicators lit?"
+  ],
+  electricFence: [
+    "Perimeter fence showing normal?", "Electric fence energized?", "Fence system normal?",
+    "E-fence running properly?", "Perimeter security system good?", "Electric fence status OK?",
+    "Fence energizer working?", "Perimeter alarm quiet?", "E-fence panel showing normal?",
+    "Fence voltage normal?", "Perimeter fence active?", "Electric fence functioning?",
+    "Fence system armed properly?", "Any fence alerts?", "Perimeter system good?",
+    "E-fence controller normal?", "Fence line secure?", "Electric fence status clear?",
+    "Perimeter fence energized?", "Any fence system issues?", "Fence panel reading normal?",
+    "E-fence operational?", "Security fence active?", "Perimeter fence in armed mode?",
+    "Fence system displaying normal?", "Any fence alarms?", "Electric fence monitoring normal?",
+    "Fence energizer light on?", "Perimeter fence functioning?", "No fence faults?"
+  ],
+  accessControl: [
+    "Any visitor issues tonight?", "Access control smooth?", "Visitor log up to date?",
+    "Any visitor questions?", "Access system running well?", "Visitor management going OK?",
+    "Any access issues?", "Visitor check-ins smooth?", "Access control system good?",
+    "Any unauthorized access attempts?", "Visitor processing going smoothly?", "Entry log current?",
+    "Any visitor complications?", "Access procedures running smoothly?", "Visitor badge system working?",
+    "Any entry issues?", "Access verification going well?", "Visitor tracking up to date?",
+    "Any access control problems?", "Entry procedures smooth?", "Visitor management system good?",
+    "Any unauthorized visitors?", "Access log complete?", "ID verification going smoothly?",
+    "Any visitor concerns?", "Entry control functioning?", "Visitor escort procedures smooth?",
+    "Any access questions?", "Contractor check-ins going well?", "Delivery access smooth?"
+  ],
+  general: [
+    "Any equipment issues?", "All systems nominal?", "Anything acting weird?",
+    "Everything running smoothly?", "All systems good?", "Any site issues?",
+    "Everything operating normally?", "All equipment functioning?", "Any problems tonight?",
+    "Site status good?", "All systems operational?", "Everything working as it should?",
+    "Any equipment concerns?", "All good at the site?", "Systems running normally?",
+    "Any malfunctions?", "Everything quiet?", "All systems in order?",
+    "Any irregularities?", "Equipment all functioning?", "Everything normal on your end?",
+    "All systems running smoothly?", "Any issues to report?", "Site conditions normal?",
+    "Everything operational?", "Any system alerts?", "All equipment responsive?",
+    "Everything in working order?", "Any unusual activity?", "All systems stable?"
+  ]
+};
+
+// Weighted system selection (based on typical failure rates)
+const SYSTEM_WEIGHTS = {
+  camera: 60,          // 60% - cameras fail most often
+  gate: 25,            // 25% - gates are second most common
+  firePanel: 8,        // 8% - fire panels occasionally
+  electricFence: 3,    // 3% - fence rarely fails
+  accessControl: 2,    // 2% - access questions
+  general: 2           // 2% - catch-all
+};
+
+// Select system check using weighted random
+function selectWeightedSystem() {
+  const rand = Math.random() * 100;
+  let cumulative = 0;
+  
+  for (const [system, weight] of Object.entries(SYSTEM_WEIGHTS)) {
+    cumulative += weight;
+    if (rand <= cumulative) return system;
+  }
+  return 'general'; // Fallback
+}
+
+// Get random question for system (avoid repeating last question)
+function getProactiveCheckQuestion(guardPhone) {
+  const system = selectWeightedSystem();
+  const questions = PROACTIVE_CHECKS[system];
+  const lastQuestion = lastCheckQuestion.get(guardPhone);
+  
+  // Filter out last used question
+  const available = questions.filter(q => q !== lastQuestion);
+  const selected = available[Math.floor(Math.random() * available.length)];
+  
+  lastCheckQuestion.set(guardPhone, selected);
+  
+  return { system, question: selected };
+}
+
+// Send proactive site check
+async function sendProactiveCheck(guardPhone) {
+  const { system, question } = getProactiveCheckQuestion(guardPhone);
+  
+  await sendSMS(guardPhone, question);
+  
+  // Track pending check
+  pendingChecks.set(guardPhone, {
+    system,
+    question,
+    sentAt: Date.now()
+  });
+  
+  // Update stats
+  proactiveCheckStats.sent++;
+  proactiveCheckStats.bySystem[system].sent++;
+  
+  // Update last contact time
+  guardLastContact.set(guardPhone, Date.now());
+  
+  // Schedule RANDOM next check (90 min to 4 hours)
+  const nextInterval = getRandomCheckInterval();
+  const nextCheckTime = Date.now() + nextInterval;
+  guardNextCheck.set(guardPhone, nextCheckTime);
+  
+  const intervalMinutes = Math.round(nextInterval / 60000);
+  console.log(`🔔 Proactive check sent to ${guardPhone}: ${system} - "${question}" (next check in ${intervalMinutes} min)`);
+}
+
+// Handle proactive check response
+async function handleProactiveCheckResponse(guardPhone, message) {
+  const pending = pendingChecks.get(guardPhone);
+  if (!pending) return false; // Not a proactive check response
+  
+  const responseTime = Math.round((Date.now() - pending.sentAt) / 1000);
+  const messageLower = message.toLowerCase();
+  
+  // Positive responses (all good)
+  const positiveKeywords = ['good', 'fine', 'ok', 'yes', 'clear', 'normal', 'all set', 'yep', 'yeah', 'yup', 'affirmative', 'correct', 'smooth', 'working'];
+  const isPositive = positiveKeywords.some(keyword => messageLower.includes(keyword));
+  
+  // Negative responses (issue detected)
+  const negativeKeywords = ['no', 'down', 'broken', 'not', 'issue', 'problem', 'stuck', 'offline', 'fuzzy', 'weird', 'acting up', 'malfunctioning'];
+  const isNegative = negativeKeywords.some(keyword => messageLower.includes(keyword));
+  
+  if (isPositive && !isNegative) {
+    // All good - log and thank
+    proactiveCheckStats.responses++;
+    proactiveCheckStats.bySystem[pending.system].passed++;
+    logCheckIn(guardPhone, true, responseTime);
+    
+    await sendSMS(guardPhone, "Great! Keep up the good work 👍");
+    pendingChecks.delete(guardPhone);
+    console.log(`✅ Proactive check passed: ${pending.system}`);
+    return true;
+  }
+  
+  if (isNegative) {
+    // Issue detected! Trigger proactive SOP
+    proactiveCheckStats.responses++;
+    proactiveCheckStats.issuesDetected++;
+    proactiveCheckStats.bySystem[pending.system].issues++;
+    logCheckIn(guardPhone, true, responseTime);
+    
+    console.log(`⚠️ Proactive check detected issue: ${pending.system} - "${message}"`);
+    pendingChecks.delete(guardPhone);
+    
+    // This will be handled by the main conversation handler which will trigger the appropriate SOP
+    return false; // Let normal flow handle it
+  }
+  
+  // Unclear response - ask for clarification
+  await sendSMS(guardPhone, "Just to confirm - is everything OK with that system? (Reply YES if good, or describe the issue)");
+  return true;
+}
+
+// Proactive check scheduler - runs every 30 minutes
+setInterval(() => {
+  const now = Date.now();
+  
+  conversationState.forEach((state, guardPhone) => {
+    // Skip if guard is in active procedure
+    if (state.active) return;
+    
+    // Check if it's time for this guard's next random check
+    const nextCheckTime = guardNextCheck.get(guardPhone);
+    
+    if (nextCheckTime && now >= nextCheckTime && !pendingChecks.has(guardPhone)) {
+      sendProactiveCheck(guardPhone);
+    }
+  });
+  
+  // Also check guards we've tracked but aren't in active conversation
+  guardLastContact.forEach((lastTime, guardPhone) => {
+    // Skip if already in conversation or has pending check
+    if (conversationState.has(guardPhone) || pendingChecks.has(guardPhone)) return;
+    
+    const nextCheckTime = guardNextCheck.get(guardPhone);
+    
+    // If we have a scheduled check time and it's passed
+    if (nextCheckTime && now >= nextCheckTime) {
+      sendProactiveCheck(guardPhone);
+    } else if (!nextCheckTime) {
+      // First time seeing this guard - schedule their first random check
+      const firstInterval = getRandomCheckInterval();
+      guardNextCheck.set(guardPhone, now + firstInterval);
+      
+      const intervalMinutes = Math.round(firstInterval / 60000);
+      console.log(`📝 New guard detected: ${guardPhone} - first check scheduled in ${intervalMinutes} min`);
+    }
+  });
+}, 30 * 60 * 1000); // Check every 30 minutes
 
 // Store incident with full metadata for analytics
 function logIncident(guardPhone, issue, resolved, steps, resolutionTime, escalated = false, abandoned = false) {
@@ -383,6 +654,39 @@ async function sendWeeklyAnalyticsEmail() {
   });
   htmlContent += `</ul><br>`;
   
+  // 🔔 Proactive check-ins
+  if (weeklyAnalytics.checkIns.length > 0) {
+    const totalCheckIns = weeklyAnalytics.checkIns.length;
+    const respondedCheckIns = weeklyAnalytics.checkIns.filter(c => c.responded);
+    const responseRate = Math.round((respondedCheckIns.length / totalCheckIns) * 100);
+    const avgResponseTime = respondedCheckIns.length > 0
+      ? Math.round(respondedCheckIns.reduce((sum, c) => sum + (c.responseTime || 0), 0) / respondedCheckIns.length / 60)
+      : 0;
+    
+    const noResponseGuards = weeklyAnalytics.checkIns
+      .filter(c => !c.responded)
+      .map(c => c.guardPhone.slice(-4))
+      .filter((v, i, a) => a.indexOf(v) === i); // unique
+    
+    htmlContent += `
+      <h3>🔔 PROACTIVE CHECK-INS</h3>
+      <ul>
+        <li>Check-ins sent: ${totalCheckIns}</li>
+        <li>Response rate: ${responseRate}% (${respondedCheckIns.length}/${totalCheckIns}) ${responseRate >= 80 ? '✅' : '⚠️'}</li>
+        <li>Avg response time: ${avgResponseTime} min</li>
+    `;
+    
+    if (noResponseGuards.length > 0) {
+      htmlContent += `<li>No response from: Guard(s) ending in ${noResponseGuards.join(', ')} - follow up recommended</li>`;
+    }
+    
+    htmlContent += `
+      </ul>
+      <p><em>Guards appreciate the check-ins - shows you care! 💚</em></p>
+      <br>
+    `;
+  }
+  
   // Trigger optimization
   if (weeklyAnalytics.unrecognizedPhrases.length > 0) {
     htmlContent += `
@@ -406,6 +710,26 @@ async function sendWeeklyAnalyticsEmail() {
     <p><em>Consider adjusting staffing or preventive maintenance during peak hours</em></p>
     <br>
   `;
+  
+  // Proactive site checks
+  if (proactiveCheckStats.sent > 0) {
+    const responseRate = Math.round((proactiveCheckStats.responses / proactiveCheckStats.sent) * 100);
+    
+    htmlContent += `
+      <h3>🔔 PROACTIVE SITE CHECKS</h3>
+      <p><strong>System Checks Performed:</strong> ${proactiveCheckStats.sent}</p>
+      <ul>
+        <li>Camera checks: ${proactiveCheckStats.bySystem.camera.sent} sent, ${proactiveCheckStats.bySystem.camera.passed} passed${proactiveCheckStats.bySystem.camera.issues > 0 ? `, ${proactiveCheckStats.bySystem.camera.issues} issues detected ⚠️` : ''}</li>
+        <li>Gate checks: ${proactiveCheckStats.bySystem.gate.sent} sent, ${proactiveCheckStats.bySystem.gate.passed} passed${proactiveCheckStats.bySystem.gate.issues > 0 ? `, ${proactiveCheckStats.bySystem.gate.issues} issues detected ⚠️` : ''}</li>
+        <li>Fire panel checks: ${proactiveCheckStats.bySystem.firePanel.sent} sent, ${proactiveCheckStats.bySystem.firePanel.passed} passed${proactiveCheckStats.bySystem.firePanel.issues > 0 ? `, ${proactiveCheckStats.bySystem.firePanel.issues} issues detected ⚠️` : ''}</li>
+        <li>Electric fence checks: ${proactiveCheckStats.bySystem.electricFence.sent} sent, ${proactiveCheckStats.bySystem.electricFence.passed} passed${proactiveCheckStats.bySystem.electricFence.issues > 0 ? `, ${proactiveCheckStats.bySystem.electricFence.issues} issues detected ⚠️` : ''}</li>
+        <li>Access control checks: ${proactiveCheckStats.bySystem.accessControl.sent} sent, ${proactiveCheckStats.bySystem.accessControl.passed} passed${proactiveCheckStats.bySystem.accessControl.issues > 0 ? `, ${proactiveCheckStats.bySystem.accessControl.issues} issues detected ⚠️` : ''}</li>
+      </ul>
+      <p><strong>Response Rate:</strong> ${responseRate}% (${proactiveCheckStats.responses}/${proactiveCheckStats.sent})</p>
+      ${proactiveCheckStats.issuesDetected > 0 ? `<p><strong>✅ Early Issue Detection:</strong> ${proactiveCheckStats.issuesDetected} issues caught before escalation!</p>` : ''}
+      <br>
+    `;
+  }
   
   htmlContent += `
     <hr>
@@ -441,7 +765,16 @@ async function sendWeeklyAnalyticsEmail() {
 function resetWeeklyAnalytics() {
   weeklyAnalytics.incidents = [];
   weeklyAnalytics.unrecognizedPhrases = [];
+  weeklyAnalytics.checkIns = [];
   weeklyAnalytics.startDate = new Date();
+  
+  // Reset proactive check stats
+  proactiveCheckStats.sent = 0;
+  proactiveCheckStats.responses = 0;
+  proactiveCheckStats.issuesDetected = 0;
+  Object.keys(proactiveCheckStats.bySystem).forEach(system => {
+    proactiveCheckStats.bySystem[system] = { sent: 0, passed: 0, issues: 0 };
+  });
 }
 
 // Helper function for comparison icons
@@ -491,6 +824,33 @@ setInterval(() => {
     }
   });
 }, 2 * 60 * 1000); // Check every 2 minutes
+
+// 🔔 PROACTIVE CHECK-INS: Check every 30 minutes for guards who've been silent 4+ hours
+setInterval(() => {
+  const now = Date.now();
+  const FOUR_HOURS = 4 * 60 * 60 * 1000; // 4 hours in milliseconds
+  
+  guardLastContact.forEach((lastContactTime, guardPhone) => {
+    const timeSinceContact = now - lastContactTime;
+    const state = conversationState.get(guardPhone);
+    
+    // Skip if:
+    // - Less than 4 hours since last contact
+    // - Already sent a check-in and waiting for response
+    // - Guard is currently in an active procedure
+    if (timeSinceContact < FOUR_HOURS) return;
+    if (checkInsSent.has(guardPhone)) return;
+    if (state && state.active) return; // Don't interrupt active procedures
+    
+    console.log(`🔔 Proactive check-in: Guard ${guardPhone} silent for ${Math.round(timeSinceContact / 1000 / 60 / 60)} hours`);
+    
+    // Send friendly check-in
+    sendSMS(guardPhone, "Hey! Been quiet tonight. Everything good? Reply OK if all's well. 👍");
+    
+    // Mark as checked in (with timestamp for response tracking)
+    checkInsSent.set(guardPhone, Date.now());
+  });
+}, 30 * 60 * 1000); // Check every 30 minutes
 
 // Configuration
 const CONFIG = {
@@ -791,6 +1151,19 @@ If unclear, reply with "1".
 // ==========================================
 
 async function handleConversation(guardPhone, message) {
+  // 🔔 UPDATE LAST CONTACT: Track when guard last messaged
+  guardLastContact.set(guardPhone, Date.now());
+  
+  // 🔔 RESCHEDULE NEXT CHECK: Set new random interval from now
+  const nextInterval = getRandomCheckInterval();
+  guardNextCheck.set(guardPhone, Date.now() + nextInterval);
+  
+  // 🔔 CHECK IF RESPONDING TO PROACTIVE SITE CHECK
+  const handledByProactive = await handleProactiveCheckResponse(guardPhone, message);
+  if (handledByProactive) {
+    return null; // Already handled, don't process further
+  }
+  
   let state = conversationState.get(guardPhone) || {
     active: false,
     currentStep: 0,
