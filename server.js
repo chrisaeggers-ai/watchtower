@@ -38,6 +38,130 @@ const conversationState = new Map();
 // Track when we last sent an abandonment alert for each guard
 const abandonmentAlertsSent = new Map();
 
+// DAILY DIGEST: Store completed/escalated tasks for 6am summary email
+const dailyTasks = {
+  resolved: [],
+  escalated: [],
+  abandoned: []
+};
+
+// DAILY DIGEST: Send summary email at 6am Pacific every day
+function scheduleDailyDigest() {
+  setInterval(() => {
+    const now = new Date();
+    const pacificTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+    const hour = pacificTime.getHours();
+    const minute = pacificTime.getMinutes();
+    
+    // Send at 6:00 AM Pacific (check every minute)
+    if (hour === 6 && minute === 0) {
+      sendDailyDigestEmail();
+    }
+  }, 60 * 1000); // Check every minute
+}
+
+// DAILY DIGEST: Send the summary email
+async function sendDailyDigestEmail() {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    console.log('Email not configured - skipping daily digest');
+    return;
+  }
+  
+  const totalTasks = dailyTasks.resolved.length + dailyTasks.escalated.length + dailyTasks.abandoned.length;
+  
+  // Don't send if no activity
+  if (totalTasks === 0) {
+    console.log('📧 No tasks yesterday - skipping daily digest');
+    dailyTasks.resolved = [];
+    dailyTasks.escalated = [];
+    dailyTasks.abandoned = [];
+    return;
+  }
+  
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const dateStr = yesterday.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  
+  const subject = `WatchTower Daily Summary - ${dateStr}`;
+  
+  let htmlContent = `
+    <h2>📊 WatchTower Daily Summary</h2>
+    <p><strong>Activity from:</strong> ${dateStr}</p>
+    <hr>
+  `;
+  
+  // RESOLVED TASKS
+  if (dailyTasks.resolved.length > 0) {
+    htmlContent += `
+      <h3>✅ RESOLVED TASKS (${dailyTasks.resolved.length})</h3>
+      <ul>
+    `;
+    dailyTasks.resolved.forEach(task => {
+      const guardLast4 = task.guardPhone.slice(-4);
+      const stepCount = task.steps.length;
+      htmlContent += `
+        <li><strong>${task.issue}</strong> - Guard ending in ${guardLast4} - ${task.time} - ${stepCount} steps completed</li>
+      `;
+    });
+    htmlContent += `</ul><br>`;
+  }
+  
+  // ESCALATED TASKS
+  if (dailyTasks.escalated.length > 0) {
+    htmlContent += `
+      <h3>⚠️ ESCALATED TASKS (${dailyTasks.escalated.length})</h3>
+      <ul>
+    `;
+    dailyTasks.escalated.forEach(task => {
+      const guardLast4 = task.guardPhone.slice(-4);
+      htmlContent += `
+        <li><strong>${task.issue}</strong> - Guard ending in ${guardLast4} - ${task.time} - ${task.reason}</li>
+      `;
+    });
+    htmlContent += `</ul><br>`;
+  }
+  
+  // ABANDONED TASKS
+  if (dailyTasks.abandoned.length > 0) {
+    htmlContent += `
+      <h3>⏰ ABANDONED TASKS (${dailyTasks.abandoned.length})</h3>
+      <ul>
+    `;
+    dailyTasks.abandoned.forEach(task => {
+      const guardLast4 = task.guardPhone.slice(-4);
+      htmlContent += `
+        <li><strong>${task.issue}</strong> - Guard ending in ${guardLast4} - ${task.time} - Guard went silent at step ${task.step}</li>
+      `;
+    });
+    htmlContent += `</ul><br>`;
+  }
+  
+  htmlContent += `
+    <hr>
+    <p><strong>TOTAL:</strong> ${totalTasks} incidents handled yesterday</p>
+  `;
+  
+  try {
+    await emailTransporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: CONFIG.OWNER_EMAIL,
+      subject: subject,
+      html: htmlContent
+    });
+    console.log(`📧 Daily digest sent: ${totalTasks} tasks from ${dateStr}`);
+    
+    // Clear the arrays for today
+    dailyTasks.resolved = [];
+    dailyTasks.escalated = [];
+    dailyTasks.abandoned = [];
+  } catch (error) {
+    console.error('Error sending daily digest:', error);
+  }
+}
+
+// Start the daily digest scheduler
+scheduleDailyDigest();
+
 // Check for abandoned conversations every 2 minutes
 setInterval(() => {
   const now = Date.now();
@@ -184,14 +308,27 @@ async function escalateToSupervisor(guardPhone, issue, currentStep, additionalCo
   console.log(`Escalated issue for ${guardPhone}: ${issue}`);
 }
 
-// Send abandonment alert (guard went silent mid-procedure)
+// Send abandonment alert (guard went silent mid-procedure) - IMMEDIATE EMAIL
 async function sendAbandonmentAlert(guardPhone, issue, currentStep, completedSteps) {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
     console.log('Email not configured - skipping abandonment alert');
     return;
   }
   
-  const subject = `WatchTower Alert: Guard Went Silent - ${issue}`;
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  
+  // Store for daily digest
+  dailyTasks.abandoned.push({
+    guardPhone,
+    issue,
+    step: currentStep,
+    time: timeStr,
+    timestamp: now
+  });
+  
+  // Send IMMEDIATE email (guard going dark is urgent!)
+  const subject = `⚠️ WatchTower Alert: Guard Went Silent - ${issue}`;
   
   const htmlContent = `
     <h2>⚠️ WatchTower Abandonment Alert</h2>
@@ -199,13 +336,13 @@ async function sendAbandonmentAlert(guardPhone, issue, currentStep, completedSte
     <p><strong>Guard Phone:</strong> ${guardPhone}</p>
     <p><strong>Issue:</strong> ${issue}</p>
     <p><strong>Last Active Step:</strong> ${currentStep}</p>
-    <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+    <p><strong>Time:</strong> ${now.toLocaleString()}</p>
     <hr>
     <h3>Steps Completed Before Going Silent:</h3>
     <ul>
       ${completedSteps.map(step => `<li>Step ${step.stepNumber}: ${step.instruction}</li>`).join('')}
     </ul>
-    <p><strong>Action Needed:</strong> Guard may be stuck, distracted, or need assistance. Consider reaching out to check on them.</p>
+    <p><strong>⚠️ Action Needed:</strong> Guard may be stuck, distracted, or need assistance. Consider reaching out to check on them.</p>
   `;
 
   try {
@@ -215,7 +352,7 @@ async function sendAbandonmentAlert(guardPhone, issue, currentStep, completedSte
       subject: subject,
       html: htmlContent
     });
-    console.log(`📧 Abandonment alert sent for ${guardPhone} at Step ${currentStep}`);
+    console.log(`📧 IMMEDIATE abandonment alert sent for ${guardPhone} at Step ${currentStep}`);
   } catch (error) {
     console.error('Error sending abandonment alert:', error);
   }
