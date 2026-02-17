@@ -50,6 +50,7 @@ const weeklyAnalytics = {
   incidents: [],          // All incidents with full metadata
   unrecognizedPhrases: [], // Messages that didn't trigger SOPs
   checkIns: [],           // Proactive check-in data
+  handoffs: [],           // Shift handoff records
   startDate: new Date(),   // Week start
   lastWeekBaseline: {      // Previous week's data for comparison
     cameraCount: 0,
@@ -59,6 +60,111 @@ const weeklyAnalytics = {
     accessCount: 0
   }
 };
+
+// 📋 SHIFT HANDOFF SYSTEM: Track handoffs and verify accuracy
+const activeHandoffs = new Map(); // Guards currently in handoff process
+const lastHandoff = new Map(); // Most recent handoff per guard (for discrepancy detection)
+const handoffAccuracy = new Map(); // Per-guard handoff performance tracking
+
+// Store handoff for analytics and discrepancy detection
+function logHandoff(outgoingGuard, handoffData) {
+  const handoffRecord = {
+    outgoingGuard,
+    timestamp: new Date(),
+    phoneLocation: handoffData.phoneLocation,
+    phoneVolume: handoffData.phoneVolume,
+    phoneCharge: handoffData.phoneCharge,
+    cameraStatus: handoffData.cameraStatus,
+    gateStatus: handoffData.gateStatus,
+    notes: handoffData.notes,
+    incomingGuard: null, // Will be set when incoming guard first texts
+    discrepancies: []
+  };
+  
+  weeklyAnalytics.handoffs.push(handoffRecord);
+  lastHandoff.set(outgoingGuard, handoffRecord);
+  
+  // Initialize accuracy tracking for this guard if not exists
+  if (!handoffAccuracy.has(outgoingGuard)) {
+    handoffAccuracy.set(outgoingGuard, {
+      total: 0,
+      accurate: 0,
+      discrepancies: []
+    });
+  }
+  
+  // Increment total handoffs
+  const accuracy = handoffAccuracy.get(outgoingGuard);
+  accuracy.total++;
+  handoffAccuracy.set(outgoingGuard, accuracy);
+}
+
+// Detect discrepancy: incoming guard reports issue that outgoing said was fine
+function detectHandoffDiscrepancy(incomingGuard, system, issueType) {
+  const DISCREPANCY_WINDOW = 60 * 60 * 1000; // 60 minutes
+  const now = Date.now();
+  
+  // Find most recent handoff (any outgoing guard)
+  const recentHandoff = Array.from(lastHandoff.values())
+    .filter(h => !h.incomingGuard) // Not yet claimed by an incoming guard
+    .sort((a, b) => b.timestamp - a.timestamp)[0];
+  
+  if (!recentHandoff) return; // No recent handoff
+  
+  const timeSinceHandoff = now - recentHandoff.timestamp.getTime();
+  
+  // Only flag if within 60-minute window
+  if (timeSinceHandoff > DISCREPANCY_WINDOW) return;
+  
+  // Set incoming guard on the handoff record
+  recentHandoff.incomingGuard = incomingGuard;
+  
+  // Check if this system was reported as "all clear" but is now broken
+  let discrepancy = null;
+  
+  if (system === 'camera' && recentHandoff.cameraStatus === 'all clear') {
+    discrepancy = {
+      system: 'Camera',
+      claimedStatus: 'ALL CLEAR',
+      actualStatus: 'DOWN',
+      minutesAfterHandoff: Math.round(timeSinceHandoff / 60000)
+    };
+  } else if (system === 'gate' && recentHandoff.gateStatus === 'normal') {
+    discrepancy = {
+      system: 'Gate',
+      claimedStatus: 'NORMAL',
+      actualStatus: 'ISSUES',
+      minutesAfterHandoff: Math.round(timeSinceHandoff / 60000)
+    };
+  }
+  
+  if (discrepancy) {
+    recentHandoff.discrepancies.push(discrepancy);
+    
+    // Update accuracy tracking
+    const accuracy = handoffAccuracy.get(recentHandoff.outgoingGuard);
+    if (accuracy) {
+      accuracy.discrepancies.push({
+        date: new Date(),
+        ...discrepancy,
+        incomingGuard
+      });
+      handoffAccuracy.set(recentHandoff.outgoingGuard, accuracy);
+    }
+    
+    // Send immediate alert email
+    sendHandoffDiscrepancyAlert(recentHandoff.outgoingGuard, incomingGuard, discrepancy);
+    
+    console.log(`⚠️ HANDOFF DISCREPANCY: ${discrepancy.system} - ${recentHandoff.outgoingGuard} claimed ${discrepancy.claimedStatus}, ${incomingGuard} reports ${discrepancy.actualStatus}`);
+  } else {
+    // No discrepancy - mark as accurate
+    const accuracy = handoffAccuracy.get(recentHandoff.outgoingGuard);
+    if (accuracy) {
+      accuracy.accurate++;
+      handoffAccuracy.set(recentHandoff.outgoingGuard, accuracy);
+    }
+  }
+}
 
 // Store check-in for analytics
 function logCheckIn(guardPhone, responded, responseTime = null) {
@@ -297,6 +403,9 @@ setInterval(() => {
     // Skip if guard is in active procedure
     if (state.active) return;
     
+    // Skip owners/supervisors - they're not guards!
+    if (CONFIG.EXCLUDED_FROM_CHECKS.includes(guardPhone)) return;
+    
     // Check if it's time for this guard's next random check
     const nextCheckTime = guardNextCheck.get(guardPhone);
     
@@ -309,6 +418,9 @@ setInterval(() => {
   guardLastContact.forEach((lastTime, guardPhone) => {
     // Skip if already in conversation or has pending check
     if (conversationState.has(guardPhone) || pendingChecks.has(guardPhone)) return;
+    
+    // Skip owners/supervisors - they're not guards!
+    if (CONFIG.EXCLUDED_FROM_CHECKS.includes(guardPhone)) return;
     
     const nextCheckTime = guardNextCheck.get(guardPhone);
     
@@ -347,6 +459,72 @@ function logUnrecognizedPhrase(message) {
   if (message.length > 5 && !weeklyAnalytics.unrecognizedPhrases.includes(message.toLowerCase())) {
     weeklyAnalytics.unrecognizedPhrases.push(message.toLowerCase());
   }
+}
+
+// 📋 SHIFT HANDOFF TRIGGERS: Phrases that indicate guard is signing off
+const SIGNOFF_TRIGGERS = [
+  "signing off", "sign off", "signed off", "sign out", "signing out", "signed out",
+  "end of shift", "shift over", "shift done", "shift ended", "shift complete",
+  "leaving", "clocking out", "clock out", "clocked out",
+  "heading out", "going home", "off duty", "off work",
+  "my shift is done", "my shift is over", "shift's done", "shift's over",
+  "logging off", "log off", "logged off",
+  "wrapping up", "wrapping out", "done for the day", "done for the night",
+  "taking off", "out for the night", "im out", "i'm out",
+  "bye", "later", "ttyl", "peace", "peace out", "out", "gotta go",
+  "see ya", "see you", "heading home", "leaving now"
+];
+
+// Handoff checklist questions
+const HANDOFF_QUESTIONS = [
+  {
+    step: 1,
+    question: "📱 Where is the duty phone right now? (Be specific - e.g., 'guard shack desk', 'charging station')",
+    field: 'phoneLocation',
+    validation: (answer) => answer.length > 3 // At least a few characters
+  },
+  {
+    step: 2,
+    question: "🔊 Is the phone volume turned ALL THE WAY UP? (Yes/No)",
+    field: 'phoneVolume',
+    validation: (answer) => {
+      const lower = answer.toLowerCase();
+      return lower.includes('yes') || lower.includes('no');
+    }
+  },
+  {
+    step: 3,
+    question: "🔋 Is the phone charged above 50%? (Yes/No)",
+    field: 'phoneCharge',
+    validation: (answer) => {
+      const lower = answer.toLowerCase();
+      return lower.includes('yes') || lower.includes('no');
+    }
+  },
+  {
+    step: 4,
+    question: "📹 Camera status - all feeds clear and recording? (Reply: 'All clear' or describe any issues)",
+    field: 'cameraStatus',
+    validation: (answer) => answer.length > 2
+  },
+  {
+    step: 5,
+    question: "🚪 Gate operating normally? (Reply: 'Normal' or describe any issues)",
+    field: 'gateStatus',
+    validation: (answer) => answer.length > 2
+  },
+  {
+    step: 6,
+    question: "📝 Anything the incoming guard needs to know? (Incidents, visitors, maintenance, or 'Nothing to report')",
+    field: 'notes',
+    validation: (answer) => answer.length > 2
+  }
+];
+
+// Check if message is a sign-off trigger
+function isSignOffMessage(message) {
+  const lower = message.toLowerCase().trim();
+  return SIGNOFF_TRIGGERS.some(trigger => lower === trigger || lower.includes(trigger));
 }
 
 // DAILY DIGEST: Send summary email at 6am Pacific every day
@@ -727,6 +905,57 @@ async function sendWeeklyAnalyticsEmail() {
     `;
   }
   
+  // Shift handoff stats
+  if (weeklyAnalytics.handoffs.length > 0) {
+    const totalHandoffs = weeklyAnalytics.handoffs.length;
+    const handoffsWithDiscrepancies = weeklyAnalytics.handoffs.filter(h => h.discrepancies.length > 0).length;
+    const accurateHandoffs = totalHandoffs - handoffsWithDiscrepancies;
+    const overallAccuracy = Math.round((accurateHandoffs / totalHandoffs) * 100);
+    
+    // Build per-guard leaderboard
+    const guardHandoffStats = {};
+    handoffAccuracy.forEach((stats, guardPhone) => {
+      if (stats.total > 0) {
+        const last4 = guardPhone.slice(-4);
+        guardHandoffStats[last4] = {
+          total: stats.total,
+          accurate: stats.accurate,
+          discrepancies: stats.discrepancies.length,
+          accuracy: Math.round((stats.accurate / stats.total) * 100)
+        };
+      }
+    });
+    
+    // Sort by accuracy
+    const sortedGuards = Object.entries(guardHandoffStats)
+      .sort((a, b) => b[1].accuracy - a[1].accuracy);
+    
+    htmlContent += `
+      <h3>📋 SHIFT HANDOFF PERFORMANCE</h3>
+      <p><strong>Total Handoffs:</strong> ${totalHandoffs}</p>
+      <p><strong>Overall Accuracy:</strong> ${overallAccuracy}% (${accurateHandoffs}/${totalHandoffs} accurate)</p>
+      ${handoffsWithDiscrepancies > 0 ? `<p><strong>⚠️ Discrepancies:</strong> ${handoffsWithDiscrepancies} handoffs had equipment status mismatches</p>` : ''}
+      <br>
+      
+      <h4>Guard Handoff Accuracy Leaderboard:</h4>
+      <ul>
+    `;
+    
+    sortedGuards.forEach(([last4, stats], index) => {
+      const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '';
+      const flag = stats.accuracy < 80 ? '⚠️' : stats.accuracy === 100 ? '⭐' : '';
+      htmlContent += `
+        <li>${medal} Guard ...${last4}: ${stats.accuracy}% accuracy (${stats.accurate}/${stats.total}) ${flag}</li>
+      `;
+    });
+    
+    htmlContent += `
+      </ul>
+      ${handoffsWithDiscrepancies > 0 ? `<p><em>Discrepancies occur when incoming guard reports equipment issues within 60 minutes of outgoing guard reporting "all clear"</em></p>` : ''}
+      <br>
+    `;
+  }
+  
   htmlContent += `
     <hr>
     <p><em>Next report: Next Monday at 9:00 AM Pacific</em></p>
@@ -762,6 +991,7 @@ function resetWeeklyAnalytics() {
   weeklyAnalytics.incidents = [];
   weeklyAnalytics.unrecognizedPhrases = [];
   weeklyAnalytics.checkIns = [];
+  weeklyAnalytics.handoffs = [];
   weeklyAnalytics.startDate = new Date();
   
   // Reset proactive check stats
@@ -770,6 +1000,15 @@ function resetWeeklyAnalytics() {
   proactiveCheckStats.issuesDetected = 0;
   Object.keys(proactiveCheckStats.bySystem).forEach(system => {
     proactiveCheckStats.bySystem[system] = { sent: 0, passed: 0, issues: 0 };
+  });
+  
+  // Reset handoff accuracy tracking (but keep running totals)
+  handoffAccuracy.forEach((stats, guardPhone) => {
+    handoffAccuracy.set(guardPhone, {
+      total: 0,
+      accurate: 0,
+      discrepancies: []
+    });
   });
 }
 
@@ -855,7 +1094,14 @@ const CONFIG = {
   SUPERVISOR_PHONE: process.env.SUPERVISOR_PHONE || '+1234567890',
   OWNER_EMAIL: process.env.OWNER_EMAIL,
   SERVER_URL: process.env.SERVER_URL || 'http://localhost:3000',
-  MAX_RETRIES: 2
+  MAX_RETRIES: 2,
+  
+  // 🚫 EXCLUDED FROM PROACTIVE CHECKS: Owners/supervisors who text in to test
+  // These numbers will NOT receive random site check texts
+  EXCLUDED_FROM_CHECKS: [
+    '+19259221067', // Chris (owner) - testing number
+    process.env.SUPERVISOR_PHONE // Supervisor
+  ].filter(Boolean)
 };
 
 // All available SOPs
@@ -1033,6 +1279,106 @@ async function sendAbandonmentAlert(guardPhone, issue, currentStep, completedSte
   }
 }
 
+// 📋 Send shift handoff completion email
+async function sendHandoffCompletionEmail(guardPhone, handoffData, shiftStats) {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    console.log('Email not configured - skipping handoff email');
+    return;
+  }
+  
+  const now = new Date();
+  const guardLast4 = guardPhone.slice(-4);
+  
+  const subject = `✅ Shift Handoff Completed - ${now.toLocaleDateString()}`;
+  
+  const htmlContent = `
+    <h2>✅ SHIFT HANDOFF COMPLETED</h2>
+    <p><strong>Outgoing Guard:</strong> ...${guardLast4}</p>
+    <p><strong>Time:</strong> ${now.toLocaleString()}</p>
+    <hr>
+    
+    <h3>📋 HANDOFF CHECKLIST:</h3>
+    <ul>
+      <li>📱 <strong>Phone Location:</strong> ${handoffData.phoneLocation}</li>
+      <li>🔊 <strong>Phone Volume:</strong> ${handoffData.phoneVolume.toUpperCase()}</li>
+      <li>🔋 <strong>Phone Charge:</strong> ${handoffData.phoneCharge.toUpperCase()}</li>
+      <li>📹 <strong>Cameras:</strong> ${handoffData.cameraStatus.toUpperCase()}</li>
+      <li>🚪 <strong>Gate:</strong> ${handoffData.gateStatus.toUpperCase()}</li>
+      <li>📝 <strong>Notes:</strong> ${handoffData.notes}</li>
+    </ul>
+    <hr>
+    
+    <h3>📊 SHIFT STATS:</h3>
+    <ul>
+      ${shiftStats.incidents > 0 ? `<li>Incidents handled: ${shiftStats.incidents}</li>` : ''}
+      ${shiftStats.avgResolution ? `<li>Avg resolution time: ${shiftStats.avgResolution} min</li>` : ''}
+      ${shiftStats.proactiveChecks ? `<li>Proactive checks responded: ${shiftStats.proactiveChecks}</li>` : ''}
+      ${shiftStats.duration ? `<li>Shift duration: ${shiftStats.duration} hours</li>` : ''}
+    </ul>
+    
+    <p><em>Incoming guard will receive briefing when they start their shift.</em></p>
+  `;
+
+  try {
+    await emailTransporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: CONFIG.OWNER_EMAIL,
+      subject: subject,
+      html: htmlContent
+    });
+    console.log(`📧 Handoff completion email sent for guard ...${guardLast4}`);
+  } catch (error) {
+    console.error('Error sending handoff completion email:', error);
+  }
+}
+
+// ⚠️ Send handoff discrepancy alert email
+async function sendHandoffDiscrepancyAlert(outgoingGuard, incomingGuard, discrepancy) {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    console.log('Email not configured - skipping discrepancy alert');
+    return;
+  }
+  
+  const outgoingLast4 = outgoingGuard.slice(-4);
+  const incomingLast4 = incomingGuard.slice(-4);
+  
+  const subject = `⚠️ HANDOFF DISCREPANCY - ${discrepancy.system} System`;
+  
+  const htmlContent = `
+    <h2>⚠️ HANDOFF DISCREPANCY DETECTED</h2>
+    <p><strong>System:</strong> ${discrepancy.system}</p>
+    <p><strong>Time Between Handoff and Report:</strong> ${discrepancy.minutesAfterHandoff} minutes</p>
+    <hr>
+    
+    <h3>WHAT HAPPENED:</h3>
+    <p>🔴 <strong>Outgoing Guard ...${outgoingLast4} reported:</strong> ${discrepancy.claimedStatus}</p>
+    <p>🟡 <strong>Incoming Guard ...${incomingLast4} reported:</strong> ${discrepancy.actualStatus}</p>
+    <hr>
+    
+    <h3>POSSIBLE EXPLANATIONS:</h3>
+    <ul>
+      <li>${discrepancy.system} system failed in the ${discrepancy.minutesAfterHandoff} minutes between handoff and incoming guard (equipment issue)</li>
+      <li>Outgoing guard did NOT properly verify ${discrepancy.system.toLowerCase()} status before signing off (training issue)</li>
+      <li>Outgoing guard knowingly provided inaccurate handoff information (discipline issue)</li>
+    </ul>
+    
+    <p><strong>⚠️ Recommended Action:</strong> Review with outgoing guard ...${outgoingLast4} to determine cause.</p>
+    <p><em>This discrepancy has been added to guard's handoff accuracy record.</em></p>
+  `;
+
+  try {
+    await emailTransporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: CONFIG.OWNER_EMAIL,
+      subject: subject,
+      html: htmlContent
+    });
+    console.log(`📧 HANDOFF DISCREPANCY alert sent: ${discrepancy.system}`);
+  } catch (error) {
+    console.error('Error sending discrepancy alert:', error);
+  }
+}
+
 // ==========================================
 // CAUTIOUS AI INTENT ANALYZER
 // ==========================================
@@ -1134,12 +1480,219 @@ If unclear, reply with "1".
     
     const stepNum = parseInt(response.content[0].text.trim());
     console.log(`🎯 Determined location: Step ${stepNum}`);
-    return isNaN(stepNum) ? 1 : stepNum;
+    return isNaN(stepNum) ? stepNum : stepNum;
 
   } catch (error) {
     console.error('Location determination failed:', error);
     return 1; // Default to step 1
   }
+}
+
+// ==========================================
+// SHIFT HANDOFF PROCESS
+// ==========================================
+
+// Start the shift handoff process
+async function startHandoffProcess(guardPhone) {
+  const handoffState = {
+    step: 0,
+    data: {},
+    startTime: Date.now()
+  };
+  
+  activeHandoffs.set(guardPhone, handoffState);
+  
+  await sendSMS(guardPhone, 
+    "📋 Before you go - let's do a quick handoff checklist. " +
+    "Takes 60 seconds. This helps the incoming guard and keeps everyone accountable.\n\n" +
+    "Ready? Reply 'Yes' to start or 'Skip' to skip (not recommended)."
+  );
+  
+  return null;
+}
+
+// Handle responses during handoff process
+async function handleHandoffResponse(guardPhone, message, handoffState) {
+  const messageLower = message.toLowerCase().trim();
+  
+  // Check if they want to skip
+  if (messageLower.includes('skip') || messageLower.includes('no')) {
+    activeHandoffs.delete(guardPhone);
+    
+    // Send alert email about skipped handoff
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
+      try {
+        await emailTransporter.sendMail({
+          from: process.env.EMAIL_USER,
+          to: CONFIG.OWNER_EMAIL,
+          subject: `⚠️ Handoff SKIPPED - Guard ...${guardPhone.slice(-4)}`,
+          html: `
+            <h2>⚠️ HANDOFF SKIPPED</h2>
+            <p><strong>Guard:</strong> ...${guardPhone.slice(-4)}</p>
+            <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+            <p>Guard chose to skip the handoff checklist.</p>
+          `
+        });
+      } catch (error) {
+        console.error('Error sending skipped handoff email:', error);
+      }
+    }
+    
+    await sendSMS(guardPhone, "Handoff skipped. Have a good one - but please do handoffs in the future for accountability!");
+    return null;
+  }
+  
+  // If they haven't started yet, check for 'yes'
+  if (handoffState.step === 0) {
+    if (messageLower.includes('yes') || messageLower.includes('ok') || messageLower.includes('ready')) {
+      handoffState.step = 1;
+      activeHandoffs.set(guardPhone, handoffState);
+      await sendSMS(guardPhone, HANDOFF_QUESTIONS[0].question);
+      return null;
+    } else {
+      await sendSMS(guardPhone, "Reply 'Yes' to start the handoff or 'Skip' to skip it.");
+      return null;
+    }
+  }
+  
+  // Process answer to current question
+  const currentQuestion = HANDOFF_QUESTIONS[handoffState.step - 1];
+  
+  if (currentQuestion.validation(message)) {
+    // Store the answer
+    handoffState.data[currentQuestion.field] = message.toLowerCase().trim();
+    
+    // Check for issues that need immediate attention
+    if (currentQuestion.field === 'cameraStatus' && !message.toLowerCase().includes('clear') && !message.toLowerCase().includes('good')) {
+      // Camera issue detected during handoff!
+      await sendSMS(guardPhone, "Camera issue detected. Let's fix that before you leave. One moment...");
+      activeHandoffs.delete(guardPhone);
+      
+      // Trigger camera SOP
+      const cameraSOP = detectSOP("cameras down");
+      if (cameraSOP) {
+        conversationState.set(guardPhone, {
+          active: true,
+          currentStep: 1,
+          issue: cameraSOP.issue,
+          activeSOP: cameraSOP.sop,
+          retries: 0,
+          completedSteps: [],
+          startTime: new Date(),
+          lastActivity: Date.now(),
+          conversationHistory: []
+        });
+        
+        const firstStep = cameraSOP.sop.steps[0];
+        await sendSMS(guardPhone, firstStep.userFriendly);
+      }
+      
+      return null;
+    }
+    
+    if (currentQuestion.field === 'gateStatus' && !message.toLowerCase().includes('normal') && !message.toLowerCase().includes('good')) {
+      // Gate issue detected during handoff!
+      await sendSMS(guardPhone, "Gate issue detected. Let's fix that before you leave. One moment...");
+      activeHandoffs.delete(guardPhone);
+      
+      // Trigger gate SOP
+      const gateSOP = detectSOP("gate stuck");
+      if (gateSOP) {
+        conversationState.set(guardPhone, {
+          active: true,
+          currentStep: 1,
+          issue: gateSOP.issue,
+          activeSOP: gateSOP.sop,
+          retries: 0,
+          completedSteps: [],
+          startTime: new Date(),
+          lastActivity: Date.now(),
+          conversationHistory: []
+        });
+        
+        const firstStep = gateSOP.sop.steps[0];
+        await sendSMS(guardPhone, firstStep.userFriendly);
+      }
+      
+      return null;
+    }
+    
+    // Move to next question
+    handoffState.step++;
+    
+    if (handoffState.step <= HANDOFF_QUESTIONS.length) {
+      // Ask next question
+      activeHandoffs.set(guardPhone, handoffState);
+      await sendSMS(guardPhone, HANDOFF_QUESTIONS[handoffState.step - 1].question);
+      return null;
+    } else {
+      // Handoff complete!
+      await completeHandoff(guardPhone, handoffState.data);
+      return null;
+    }
+  } else {
+    // Invalid answer
+    await sendSMS(guardPhone, `Please answer: ${currentQuestion.question}`);
+    return null;
+  }
+}
+
+// Complete the handoff process
+async function completeHandoff(guardPhone, handoffData) {
+  activeHandoffs.delete(guardPhone);
+  
+  // Calculate shift stats
+  const shiftStats = {
+    incidents: weeklyAnalytics.incidents.filter(i => i.guardPhone === guardPhone && 
+      i.timestamp > new Date(Date.now() - 12 * 60 * 60 * 1000)).length,
+    avgResolution: null,
+    proactiveChecks: weeklyAnalytics.checkIns.filter(c => c.guardPhone === guardPhone &&
+      c.timestamp > new Date(Date.now() - 12 * 60 * 60 * 1000)).length,
+    duration: null
+  };
+  
+  // Log handoff
+  logHandoff(guardPhone, handoffData);
+  
+  // Send completion email to owner
+  await sendHandoffCompletionEmail(guardPhone, handoffData, shiftStats);
+  
+  // Send confirmation to outgoing guard
+  await sendSMS(guardPhone, 
+    "✅ Handoff complete! Great shift. " +
+    "Incoming guard will be briefed. Stay safe!"
+  );
+  
+  console.log(`📋 Handoff completed for guard ...${guardPhone.slice(-4)}`);
+}
+
+// Send briefing to incoming guard (call this when new guard first texts in)
+async function sendIncomingGuardBriefing(guardPhone) {
+  // Find most recent handoff that hasn't been claimed
+  const recentHandoff = Array.from(lastHandoff.values())
+    .filter(h => !h.incomingGuard)
+    .sort((a, b) => b.timestamp - a.timestamp)[0];
+  
+  if (!recentHandoff) return; // No recent handoff
+  
+  // Check if handoff is recent (within 2 hours)
+  const timeSinceHandoff = Date.now() - recentHandoff.timestamp.getTime();
+  if (timeSinceHandoff > 2 * 60 * 60 * 1000) return; // Too old
+  
+  // Mark this handoff as claimed
+  recentHandoff.incomingGuard = guardPhone;
+  
+  const outgoingLast4 = recentHandoff.outgoingGuard.slice(-4);
+  
+  const briefing = `📋 SHIFT HANDOFF from Guard ...${outgoingLast4}\n\n` +
+    `📱 Duty Phone: ${recentHandoff.phoneLocation}, volume ${recentHandoff.phoneVolume}, ${recentHandoff.phoneCharge} charge\n` +
+    `📹 Cameras: ${recentHandoff.cameraStatus.toUpperCase()}\n` +
+    `🚪 Gate: ${recentHandoff.gateStatus.toUpperCase()}\n` +
+    `📝 Notes: ${recentHandoff.notes}\n\n` +
+    `Any questions? Text me anytime.`;
+  
+  await sendSMS(guardPhone, briefing);
+  console.log(`📋 Incoming guard briefing sent to ...${guardPhone.slice(-4)}`);
 }
 
 // ==========================================
@@ -1158,6 +1711,17 @@ async function handleConversation(guardPhone, message) {
   const handledByProactive = await handleProactiveCheckResponse(guardPhone, message);
   if (handledByProactive) {
     return null; // Already handled, don't process further
+  }
+  
+  // 📋 CHECK IF IN HANDOFF PROCESS
+  const handoffState = activeHandoffs.get(guardPhone);
+  if (handoffState) {
+    return await handleHandoffResponse(guardPhone, message, handoffState);
+  }
+  
+  // 📋 CHECK IF SIGNING OFF (START HANDOFF)
+  if (isSignOffMessage(message)) {
+    return await startHandoffProcess(guardPhone);
   }
   
   let state = conversationState.get(guardPhone) || {
@@ -1188,6 +1752,13 @@ async function handleConversation(guardPhone, message) {
     const detected = detectSOP(message);
     
     if (detected) {
+      // 📋 Check for handoff discrepancy (incoming guard reports issue that outgoing said was fine)
+      const issueType = detected.issue.toLowerCase().includes('camera') ? 'camera' :
+                        detected.issue.toLowerCase().includes('gate') ? 'gate' : null;
+      if (issueType) {
+        detectHandoffDiscrepancy(guardPhone, issueType, detected.issue);
+      }
+      
       state = {
         active: true,
         currentStep: 1,
@@ -1209,6 +1780,9 @@ async function handleConversation(guardPhone, message) {
       await sendSMS(guardPhone, firstStep.userFriendly, imageUrl);
       return null;
     } else {
+      // 📋 Send incoming guard briefing if this is their first message and there's a recent handoff
+      await sendIncomingGuardBriefing(guardPhone);
+      
       // General question - use Claude AI with company knowledge
       try {
         const systemPrompt = `You are WatchTower, a helpful SMS assistant for Manzanita Security guards.
