@@ -38,10 +38,6 @@ const conversationState = new Map();
 // Track when we last sent an abandonment alert for each guard
 const abandonmentAlertsSent = new Map();
 
-// 🔔 PROACTIVE CHECK-INS: Track last contact time per guard
-const guardLastContact = new Map();
-const checkInsSent = new Map(); // Track which guards we've checked in with
-
 // DAILY DIGEST: Store completed/escalated tasks for 6am summary email
 const dailyTasks = {
   resolved: [],
