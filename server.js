@@ -1715,7 +1715,15 @@ async function sendSMS(to, message, imageUrl = null) {
     }
     
     await twilioClient.messages.create(messageData);
-    console.log(`${imageUrl ? 'MMS' : CONFIG.WHATSAPP_MODE ? 'WhatsApp' : 'SMS'} sent to ${to}: ${message.substring(0, 50)}...`);
+    
+    // Improved logging - show full message
+    const msgType = imageUrl ? 'MMS' : CONFIG.WHATSAPP_MODE ? 'WhatsApp' : 'SMS';
+    const toDisplay = to.slice(-4);
+    console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    console.log(`📤 ${msgType} sent to ...${toDisplay} (${message.length} chars):`);
+    console.log(message);
+    if (imageUrl) console.log(`📸 Image: ${imageUrl}`);
+    console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
   } catch (error) {
     console.error('Error sending message:', error);
   }
@@ -2948,7 +2956,12 @@ app.post('/sms', async (req, res) => {
   const guardPhone = req.body.From.replace('whatsapp:', '');
   const message = req.body.Body;
   
-  console.log(`📱 Received from ${guardPhone}: ${message}`);
+  // Improved logging - show full incoming message
+  const fromDisplay = guardPhone.slice(-4);
+  console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+  console.log(`📱 RECEIVED from ...${fromDisplay} (${message.length} chars):`);
+  console.log(message);
+  console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
   
   try {
     const response = await handleConversation(guardPhone, message);
@@ -2957,10 +2970,7 @@ app.post('/sms', async (req, res) => {
       const twiml = new twilio.twiml.MessagingResponse();
       twiml.message(response);
       res.type('text/xml').send(twiml.toString());
-      
-      // Safe logging - handle non-string responses
-      const responseStr = typeof response === 'string' ? response : JSON.stringify(response);
-      console.log(`📤 Response sent: ${responseStr.substring(0, 50)}...`);
+      // Note: Actual SMS sending is logged by sendSMS function
     } else {
       res.sendStatus(200);
     }
