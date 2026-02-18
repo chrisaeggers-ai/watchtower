@@ -2604,6 +2604,9 @@ async function handleHandoffResponse(guardPhone, message, handoffState) {
       // Trigger camera SOP
       const cameraSOP = detectSOP("cameras down");
       if (cameraSOP) {
+        const firstStep = cameraSOP.sop.steps[0];
+        const imageUrl = firstStep.image ? `${CONFIG.SERVER_URL}/images/${firstStep.image}` : null;
+        
         conversationState.set(guardPhone, {
           active: true,
           currentStep: 1,
@@ -2613,11 +2616,17 @@ async function handleHandoffResponse(guardPhone, message, handoffState) {
           completedSteps: [],
           startTime: new Date(),
           lastActivity: Date.now(),
-          conversationHistory: []
+          conversationHistory: [
+            { role: 'guard', content: message },
+            { role: 'watchtower', content: firstStep.userFriendly }
+          ]
         });
         
-        const firstStep = cameraSOP.sop.steps[0];
-        await sendSMS(guardPhone, firstStep.userFriendly);
+        await sendSMS(guardPhone, firstStep.userFriendly, imageUrl);
+        console.log(`🔧 Started Camera SOP from handoff for ${guardPhone}`);
+      } else {
+        console.error('❌ Camera SOP not found!');
+        await sendSMS(guardPhone, "Camera SOP not available. Please contact supervisor.");
       }
       
       return null;
@@ -2639,6 +2648,9 @@ async function handleHandoffResponse(guardPhone, message, handoffState) {
       // Trigger gate SOP
       const gateSOP = detectSOP("gate stuck");
       if (gateSOP) {
+        const firstStep = gateSOP.sop.steps[0];
+        const imageUrl = firstStep.image ? `${CONFIG.SERVER_URL}/images/${firstStep.image}` : null;
+        
         conversationState.set(guardPhone, {
           active: true,
           currentStep: 1,
@@ -2648,11 +2660,17 @@ async function handleHandoffResponse(guardPhone, message, handoffState) {
           completedSteps: [],
           startTime: new Date(),
           lastActivity: Date.now(),
-          conversationHistory: []
+          conversationHistory: [
+            { role: 'guard', content: message },
+            { role: 'watchtower', content: firstStep.userFriendly }
+          ]
         });
         
-        const firstStep = gateSOP.sop.steps[0];
-        await sendSMS(guardPhone, firstStep.userFriendly);
+        await sendSMS(guardPhone, firstStep.userFriendly, imageUrl);
+        console.log(`🔧 Started Gate SOP from handoff for ${guardPhone}`);
+      } else {
+        console.error('❌ Gate SOP not found!');
+        await sendSMS(guardPhone, "Gate SOP not available. Please contact supervisor.");
       }
       
       return null;
