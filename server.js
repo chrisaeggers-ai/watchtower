@@ -66,6 +66,203 @@ const activeHandoffs = new Map(); // Guards currently in handoff process
 const lastHandoff = new Map(); // Most recent handoff per guard (for discrepancy detection)
 const handoffAccuracy = new Map(); // Per-guard handoff performance tracking
 
+// 💰 ROI CALCULATOR: Track cost savings from WatchTower operations
+const roiTracking = {
+  monthlyData: [],
+  currentMonth: {
+    startDate: new Date(),
+    earlyDetections: [],
+    preventedEscalations: [],
+    handoffCatches: [],
+    totalSavings: 0
+  }
+};
+
+// ⚡ RESPONSE SPEED ANALYTICS: Track guard alertness and engagement
+const responseSpeedTracking = {
+  guards: new Map(), // Per-guard response time data
+  allResponses: []    // All response events for pattern analysis
+};
+
+// Initialize response tracking for a guard
+function initializeGuardResponseTracking(guardPhone) {
+  if (!responseSpeedTracking.guards.has(guardPhone)) {
+    responseSpeedTracking.guards.set(guardPhone, {
+      proactiveCheckResponses: [],
+      sopStepResponses: [],
+      initialIncidentResponses: [],
+      averages: {
+        proactiveCheck: 0,
+        sopStep: 0,
+        initialIncident: 0,
+        overall: 0
+      },
+      alertnessScore: 100, // 0-100 score
+      byTimeOfDay: {
+        morning: [],   // 6am-12pm
+        afternoon: [], // 12pm-6pm
+        evening: [],   // 6pm-12am
+        night: []      // 12am-6am
+      }
+    });
+  }
+}
+
+// Log response speed event
+function logResponseSpeed(guardPhone, responseType, responseTimeSeconds, context = {}) {
+  initializeGuardResponseTracking(guardPhone);
+  
+  const guardData = responseSpeedTracking.guards.get(guardPhone);
+  const hour = new Date().getHours();
+  
+  // Determine time of day
+  let timeOfDay = 'night';
+  if (hour >= 6 && hour < 12) timeOfDay = 'morning';
+  else if (hour >= 12 && hour < 18) timeOfDay = 'afternoon';
+  else if (hour >= 18 && hour < 24) timeOfDay = 'evening';
+  
+  const event = {
+    timestamp: new Date(),
+    responseTimeSeconds,
+    timeOfDay,
+    hour,
+    context
+  };
+  
+  // Add to appropriate category
+  if (responseType === 'proactive_check') {
+    guardData.proactiveCheckResponses.push(event);
+  } else if (responseType === 'sop_step') {
+    guardData.sopStepResponses.push(event);
+  } else if (responseType === 'initial_incident') {
+    guardData.initialIncidentResponses.push(event);
+  }
+  
+  // Add to time-of-day tracking
+  guardData.byTimeOfDay[timeOfDay].push(event);
+  
+  // Add to global tracking
+  responseSpeedTracking.allResponses.push({
+    guardPhone,
+    responseType,
+    ...event
+  });
+  
+  // Recalculate averages
+  calculateResponseAverages(guardPhone);
+  
+  responseSpeedTracking.guards.set(guardPhone, guardData);
+  
+  console.log(`⚡ Response logged: ${guardPhone.slice(-4)} - ${responseType} - ${responseTimeSeconds}s`);
+}
+
+// Calculate response time averages
+function calculateResponseAverages(guardPhone) {
+  const guardData = responseSpeedTracking.guards.get(guardPhone);
+  if (!guardData) return;
+  
+  // Calculate proactive check average
+  if (guardData.proactiveCheckResponses.length > 0) {
+    const sum = guardData.proactiveCheckResponses.reduce((acc, r) => acc + r.responseTimeSeconds, 0);
+    guardData.averages.proactiveCheck = Math.round(sum / guardData.proactiveCheckResponses.length);
+  }
+  
+  // Calculate SOP step average
+  if (guardData.sopStepResponses.length > 0) {
+    const sum = guardData.sopStepResponses.reduce((acc, r) => acc + r.responseTimeSeconds, 0);
+    guardData.averages.sopStep = Math.round(sum / guardData.sopStepResponses.length);
+  }
+  
+  // Calculate initial incident average
+  if (guardData.initialIncidentResponses.length > 0) {
+    const sum = guardData.initialIncidentResponses.reduce((acc, r) => acc + r.responseTimeSeconds, 0);
+    guardData.averages.initialIncident = Math.round(sum / guardData.initialIncidentResponses.length);
+  }
+  
+  // Calculate overall average
+  const allResponses = [
+    ...guardData.proactiveCheckResponses,
+    ...guardData.sopStepResponses,
+    ...guardData.initialIncidentResponses
+  ];
+  
+  if (allResponses.length > 0) {
+    const sum = allResponses.reduce((acc, r) => acc + r.responseTimeSeconds, 0);
+    guardData.averages.overall = Math.round(sum / allResponses.length);
+  }
+  
+  // Calculate alertness score (0-100, lower response time = higher score)
+  // Target: <5 min (300s) = 100 points, >10 min (600s) = 0 points
+  const targetTime = 300; // 5 minutes
+  const maxTime = 600;    // 10 minutes
+  
+  if (guardData.averages.overall <= targetTime) {
+    guardData.alertnessScore = 100;
+  } else if (guardData.averages.overall >= maxTime) {
+    guardData.alertnessScore = 0;
+  } else {
+    guardData.alertnessScore = Math.round(100 - ((guardData.averages.overall - targetTime) / (maxTime - targetTime)) * 100);
+  }
+  
+  responseSpeedTracking.guards.set(guardPhone, guardData);
+}
+
+// Get time-of-day performance pattern
+function getTimeOfDayPattern(guardPhone) {
+  const guardData = responseSpeedTracking.guards.get(guardPhone);
+  if (!guardData) return null;
+  
+  const patterns = {};
+  
+  ['morning', 'afternoon', 'evening', 'night'].forEach(period => {
+    const responses = guardData.byTimeOfDay[period];
+    if (responses.length > 0) {
+      const sum = responses.reduce((acc, r) => acc + r.responseTimeSeconds, 0);
+      const avg = Math.round(sum / responses.length);
+      patterns[period] = {
+        average: avg,
+        count: responses.length,
+        rating: avg <= 300 ? 'excellent' : avg <= 420 ? 'good' : avg <= 600 ? 'slow' : 'very_slow'
+      };
+    }
+  });
+  
+  return patterns;
+}
+
+// Cost constants (industry averages)
+const COST_SAVINGS = {
+  emergencyServiceCall: 400,      // Emergency repair call
+  guardOvertime: 250,              // Overtime if equipment fails mid-shift
+  preventedDowntime: 150,          // Per hour of prevented downtime
+  handoffPhoneIssue: 100,          // Prevented missed calls/communication issues
+  handoffEquipmentIssue: 350,      // Equipment issue caught at handoff vs during shift
+  earlyDetection: 500              // Average savings from catching issue early
+};
+
+// Log ROI event
+function logROISavings(eventType, details, savingsAmount) {
+  const event = {
+    date: new Date(),
+    type: eventType,
+    details,
+    savings: savingsAmount
+  };
+  
+  // Add to appropriate category
+  if (eventType === 'early_detection') {
+    roiTracking.currentMonth.earlyDetections.push(event);
+  } else if (eventType === 'prevented_escalation') {
+    roiTracking.currentMonth.preventedEscalations.push(event);
+  } else if (eventType === 'handoff_catch') {
+    roiTracking.currentMonth.handoffCatches.push(event);
+  }
+  
+  roiTracking.currentMonth.totalSavings += savingsAmount;
+  
+  console.log(`💰 ROI Event: ${eventType} - $${savingsAmount} saved`);
+}
+
 // Store handoff for analytics and discrepancy detection
 function logHandoff(outgoingGuard, handoffData) {
   const handoffRecord = {
@@ -370,6 +567,12 @@ async function handleProactiveCheckResponse(guardPhone, message) {
     proactiveCheckStats.bySystem[pending.system].passed++;
     logCheckIn(guardPhone, true, responseTime);
     
+    // ⚡ RESPONSE SPEED: Log proactive check response time
+    logResponseSpeed(guardPhone, 'proactive_check', responseTime, {
+      system: pending.system,
+      question: pending.question
+    });
+    
     await sendSMS(guardPhone, "Great! Keep up the good work 👍");
     pendingChecks.delete(guardPhone);
     console.log(`✅ Proactive check passed: ${pending.system}`);
@@ -382,6 +585,13 @@ async function handleProactiveCheckResponse(guardPhone, message) {
     proactiveCheckStats.issuesDetected++;
     proactiveCheckStats.bySystem[pending.system].issues++;
     logCheckIn(guardPhone, true, responseTime);
+    
+    // 💰 ROI: Log early detection savings
+    logROISavings(
+      'early_detection',
+      `Proactive ${pending.system} check caught issue before failure`,
+      COST_SAVINGS.earlyDetection
+    );
     
     console.log(`⚠️ Proactive check detected issue: ${pending.system} - "${message}"`);
     pendingChecks.delete(guardPhone);
@@ -956,6 +1166,142 @@ async function sendWeeklyAnalyticsEmail() {
     `;
   }
   
+  // ⚡ RESPONSE SPEED ANALYTICS - THE ALERTNESS SECTION!
+  if (responseSpeedTracking.guards.size > 0) {
+    const guardSpeedData = [];
+    
+    responseSpeedTracking.guards.forEach((data, guardPhone) => {
+      if (data.proactiveCheckResponses.length > 0 || data.sopStepResponses.length > 0) {
+        const last4 = guardPhone.slice(-4);
+        guardSpeedData.push({
+          last4,
+          averages: data.averages,
+          alertnessScore: data.alertnessScore,
+          totalResponses: data.proactiveCheckResponses.length + data.sopStepResponses.length,
+          timeOfDay: getTimeOfDayPattern(guardPhone)
+        });
+      }
+    });
+    
+    // Sort by alertness score
+    guardSpeedData.sort((a, b) => b.alertnessScore - a.alertnessScore);
+    
+    if (guardSpeedData.length > 0) {
+      const teamAvgOverall = Math.round(
+        guardSpeedData.reduce((sum, g) => sum + g.averages.overall, 0) / guardSpeedData.length
+      );
+      const teamAvgAlertnessScore = Math.round(
+        guardSpeedData.reduce((sum, g) => sum + g.alertnessScore, 0) / guardSpeedData.length
+      );
+      
+      htmlContent += `
+        <h3>⚡ RESPONSE SPEED ANALYTICS</h3>
+        <p><strong>Team Average Response Time:</strong> ${Math.floor(teamAvgOverall / 60)}:${(teamAvgOverall % 60).toString().padStart(2, '0')} min</p>
+        <p><strong>Team Alertness Score:</strong> ${teamAvgAlertnessScore}/100 ${teamAvgAlertnessScore >= 80 ? '✅' : teamAvgAlertnessScore >= 60 ? '⚠️' : '🚨'}</p>
+        <br>
+        
+        <h4>Guard Response Performance:</h4>
+        <ul>
+      `;
+      
+      guardSpeedData.forEach((guard, index) => {
+        const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : '';
+        const flag = guard.alertnessScore >= 80 ? '⭐ ALERT' : guard.alertnessScore >= 60 ? '✅ GOOD' : guard.alertnessScore >= 40 ? '⚠️ SLOW' : '🚨 VERY SLOW';
+        
+        const proactiveAvg = guard.averages.proactiveCheck > 0 ? 
+          `${Math.floor(guard.averages.proactiveCheck / 60)}:${(guard.averages.proactiveCheck % 60).toString().padStart(2, '0')}` : 'N/A';
+        const sopAvg = guard.averages.sopStep > 0 ? 
+          `${Math.floor(guard.averages.sopStep / 60)}:${(guard.averages.sopStep % 60).toString().padStart(2, '0')}` : 'N/A';
+        
+        htmlContent += `
+          <li>${medal} <strong>Guard ...${guard.last4}:</strong> ${flag}
+            <ul>
+              <li>Alertness Score: ${guard.alertnessScore}/100</li>
+              <li>Avg response to proactive checks: ${proactiveAvg} min</li>
+              <li>Avg time between SOP steps: ${sopAvg} min</li>
+              <li>Total responses: ${guard.totalResponses}</li>
+            </ul>
+          </li>
+        `;
+      });
+      
+      htmlContent += `
+        </ul>
+        <br>
+        
+        <h4>🕐 Time-of-Day Patterns:</h4>
+      `;
+      
+      // Analyze team patterns by time of day
+      const teamPatterns = { morning: [], afternoon: [], evening: [], night: [] };
+      guardSpeedData.forEach(guard => {
+        if (guard.timeOfDay) {
+          Object.keys(guard.timeOfDay).forEach(period => {
+            if (guard.timeOfDay[period] && guard.timeOfDay[period].average) {
+              teamPatterns[period].push(guard.timeOfDay[period].average);
+            }
+          });
+        }
+      });
+      
+      htmlContent += `<ul>`;
+      
+      ['morning', 'afternoon', 'evening', 'night'].forEach(period => {
+        const periodLabel = period.charAt(0).toUpperCase() + period.slice(1);
+        const timeRange = period === 'morning' ? '6am-12pm' : 
+                         period === 'afternoon' ? '12pm-6pm' :
+                         period === 'evening' ? '6pm-12am' : '12am-6am';
+        
+        if (teamPatterns[period].length > 0) {
+          const avg = Math.round(teamPatterns[period].reduce((a, b) => a + b, 0) / teamPatterns[period].length);
+          const rating = avg <= 300 ? '✅ Excellent' : avg <= 420 ? '👍 Good' : avg <= 600 ? '⚠️ Slow' : '🚨 Very Slow';
+          htmlContent += `
+            <li><strong>${periodLabel} (${timeRange}):</strong> ${Math.floor(avg / 60)}:${(avg % 60).toString().padStart(2, '0')} avg ${rating}</li>
+          `;
+        }
+      });
+      
+      htmlContent += `
+        </ul>
+        <p><em>Target response time: &lt;5 minutes = 100 points | &gt;10 minutes = 0 points</em></p>
+        <br>
+      `;
+    }
+  }
+  
+  // 💰 ROI Summary - THE MONEY SECTION!
+  const weekSavings = roiTracking.currentMonth.totalSavings;
+  const earlyDetectionCount = roiTracking.currentMonth.earlyDetections.length;
+  const preventedEscalationCount = roiTracking.currentMonth.preventedEscalations.length;
+  const handoffCatchCount = roiTracking.currentMonth.handoffCatches.length;
+  
+  if (weekSavings > 0) {
+    const watchtowerCost = 100; // Estimated monthly cost
+    const roi = Math.round((weekSavings / watchtowerCost) * 100);
+    
+    htmlContent += `
+      <h3>💰 COST SAVINGS & ROI</h3>
+      <p><strong style="font-size: 20px; color: #28a745;">This Week's Savings: $${weekSavings.toLocaleString()}</strong></p>
+      
+      <h4>Breakdown:</h4>
+      <ul>
+        ${earlyDetectionCount > 0 ? `<li><strong>Early Issue Detection:</strong> ${earlyDetectionCount} issues caught before failure → $${earlyDetectionCount * COST_SAVINGS.earlyDetection} saved</li>` : ''}
+        ${preventedEscalationCount > 0 ? `<li><strong>Prevented Emergency Calls:</strong> ${preventedEscalationCount} incidents resolved by guards → $${preventedEscalationCount * COST_SAVINGS.emergencyServiceCall} saved</li>` : ''}
+        ${handoffCatchCount > 0 ? `<li><strong>Handoff Catches:</strong> ${handoffCatchCount} issues caught during shift change → $${handoffCatchCount * (COST_SAVINGS.handoffPhoneIssue + COST_SAVINGS.handoffEquipmentIssue) / 2} saved</li>` : ''}
+      </ul>
+      
+      <h4>💎 The Value:</h4>
+      <ul>
+        <li>WatchTower Investment: ~$${watchtowerCost}/month</li>
+        <li>This Week's Return: $${weekSavings}</li>
+        <li>Projected Monthly ROI: ${roi}%</li>
+      </ul>
+      
+      <p><strong>✅ Bottom Line:</strong> Every dollar invested in WatchTower returns $${Math.round(weekSavings / watchtowerCost)} in cost savings!</p>
+      <br>
+    `;
+  }
+  
   htmlContent += `
     <hr>
     <p><em>Next report: Next Monday at 9:00 AM Pacific</em></p>
@@ -1010,6 +1356,45 @@ function resetWeeklyAnalytics() {
       discrepancies: []
     });
   });
+  
+  // 💰 Archive current month's ROI and reset
+  if (roiTracking.currentMonth.totalSavings > 0) {
+    roiTracking.monthlyData.push({
+      month: new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+      ...roiTracking.currentMonth
+    });
+  }
+  
+  roiTracking.currentMonth = {
+    startDate: new Date(),
+    earlyDetections: [],
+    preventedEscalations: [],
+    handoffCatches: [],
+    totalSavings: 0
+  };
+  
+  // ⚡ Reset response speed tracking (keep guards in map but clear weekly data)
+  responseSpeedTracking.guards.forEach((data, guardPhone) => {
+    responseSpeedTracking.guards.set(guardPhone, {
+      proactiveCheckResponses: [],
+      sopStepResponses: [],
+      initialIncidentResponses: [],
+      averages: {
+        proactiveCheck: 0,
+        sopStep: 0,
+        initialIncident: 0,
+        overall: 0
+      },
+      alertnessScore: 100,
+      byTimeOfDay: {
+        morning: [],
+        afternoon: [],
+        evening: [],
+        night: []
+      }
+    });
+  });
+  responseSpeedTracking.allResponses = [];
 }
 
 // Helper function for comparison icons
@@ -1562,9 +1947,34 @@ async function handleHandoffResponse(guardPhone, message, handoffState) {
     // Store the answer
     handoffState.data[currentQuestion.field] = message.toLowerCase().trim();
     
+    // 💰 ROI: Log phone issues caught at handoff
+    if (currentQuestion.field === 'phoneVolume' && message.toLowerCase().includes('no')) {
+      logROISavings(
+        'handoff_catch',
+        'Phone volume issue caught at handoff - prevented missed calls',
+        COST_SAVINGS.handoffPhoneIssue
+      );
+    }
+    
+    if (currentQuestion.field === 'phoneCharge' && message.toLowerCase().includes('no')) {
+      logROISavings(
+        'handoff_catch',
+        'Phone charge issue caught at handoff - prevented dead phone',
+        COST_SAVINGS.handoffPhoneIssue
+      );
+    }
+    
     // Check for issues that need immediate attention
     if (currentQuestion.field === 'cameraStatus' && !message.toLowerCase().includes('clear') && !message.toLowerCase().includes('good')) {
       // Camera issue detected during handoff!
+      
+      // 💰 ROI: Log handoff catch (fixed before incoming guard arrives)
+      logROISavings(
+        'handoff_catch',
+        'Camera issue caught at handoff before incoming guard affected',
+        COST_SAVINGS.handoffEquipmentIssue
+      );
+      
       await sendSMS(guardPhone, "Camera issue detected. Let's fix that before you leave. One moment...");
       activeHandoffs.delete(guardPhone);
       
@@ -1592,6 +2002,14 @@ async function handleHandoffResponse(guardPhone, message, handoffState) {
     
     if (currentQuestion.field === 'gateStatus' && !message.toLowerCase().includes('normal') && !message.toLowerCase().includes('good')) {
       // Gate issue detected during handoff!
+      
+      // 💰 ROI: Log handoff catch (fixed before incoming guard arrives)
+      logROISavings(
+        'handoff_catch',
+        'Gate issue caught at handoff before incoming guard affected',
+        COST_SAVINGS.handoffEquipmentIssue
+      );
+      
       await sendSMS(guardPhone, "Gate issue detected. Let's fix that before you leave. One moment...");
       activeHandoffs.delete(guardPhone);
       
@@ -1814,6 +2232,16 @@ RESPONSE RULES:
 
   // ACTIVE TROUBLESHOOTING - Use intelligent interpretation
   if (state.active && state.activeSOP) {
+    // ⚡ RESPONSE SPEED: Track time since last activity
+    if (state.lastActivity) {
+      const responseTimeSeconds = Math.round((Date.now() - state.lastActivity) / 1000);
+      logResponseSpeed(guardPhone, 'sop_step', responseTimeSeconds, {
+        issue: state.issue,
+        currentStep: state.currentStep,
+        totalSteps: state.activeSOP.steps.length
+      });
+    }
+    
     // Update last activity timestamp (for abandonment detection)
     state.lastActivity = Date.now();
     conversationState.set(guardPhone, state);
@@ -1850,6 +2278,13 @@ RESPONSE RULES:
        
        // Log incident for weekly analytics
        logIncident(guardPhone, state.issue, true, state.completedSteps, resolutionTime, false, false);
+       
+       // 💰 ROI: Log prevented escalation (guard fixed it vs emergency service call)
+       logROISavings(
+         'prevented_escalation',
+         `${state.issue} resolved by guard in ${Math.round(resolutionTime / 60)} min`,
+         COST_SAVINGS.emergencyServiceCall
+       );
        
        await sendEmailReport(guardPhone, state.issue, true, state.completedSteps);
        conversationState.delete(guardPhone);
