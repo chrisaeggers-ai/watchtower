@@ -3239,8 +3239,33 @@ async function handleConversation(guardPhone, message) {
         
       case 'QUESTION':
         console.log(`✅ AI detected: QUESTION - using handbook`);
-        // Use AI handbook knowledge for questions
-        break;
+        // Use AI handbook knowledge to answer question
+        try {
+          const systemPrompt = `You are WatchTower, a helpful SMS assistant for Manzanita Security guards.
+
+${COMPANY_KNOWLEDGE}
+
+RESPONSE RULES:
+- Keep responses SHORT (2-3 sentences max)
+- Be DIRECTIVE ("Do this" not "You might want to...")
+- Use the company knowledge above to give accurate answers
+- If you don't know, say "Contact Emma (510-612-4813) or Chris (925-922-1067) about that"
+- Sound like a calm supervisor, not a chatbot
+- Be professional but friendly`;
+
+          const response = await anthropic.messages.create({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 300,
+            messages: [{ role: 'user', content: message }],
+            system: systemPrompt
+          });
+          
+          console.log(`✅ Handbook AI answered question`);
+          return response.content[0].text;
+        } catch (error) {
+          console.error('Claude API error:', error);
+          return "I'm having trouble right now. Text your supervisor.";
+        }
         
       case 'ACTIVE_CONVERSATION':
         console.log(`⚠️ AI detected: ACTIVE_CONVERSATION but no active state - treating as OTHER`);
