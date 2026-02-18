@@ -2522,9 +2522,12 @@ async function startHandoffProcess(guardPhone) {
 // Handle responses during handoff process
 async function handleHandoffResponse(guardPhone, message, handoffState) {
   const messageLower = message.toLowerCase().trim();
+  const words = messageLower.split(/\s+/); // Split into words for exact matching
   
-  // Check if they want to skip
-  if (messageLower.includes('skip') || messageLower.includes('no')) {
+  // Check if they want to skip (exact word match only - not substring!)
+  if (words.includes('skip') || (words.includes('no') && words.length <= 2)) {
+    // Only treat 'no' as skip if it's alone or "no thanks" etc.
+    // This prevents "Normal", "Nothing", "Known" from triggering skip
     activeHandoffs.delete(guardPhone);
     
     // Send alert email about skipped handoff
