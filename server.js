@@ -78,6 +78,88 @@ const roiTracking = {
   }
 };
 
+// ⏰ TIME-BASED ISSUE PATTERN TRACKING: Predictive operational intelligence
+const issuePatterns = {
+  byHour: {}, // { "14": { cameraIssues: 3, gateIssues: 1 } }
+  byDay: {}, // { "Monday": { cameraIssues: 12, gateIssues: 5 } }
+  byShift: { // Shift types
+    day: { start: 6, end: 14, issues: [] },
+    swing: { start: 14, end: 22, issues: [] },
+    night: { start: 22, end: 6, issues: [] }
+  },
+  byEquipment: {}, // { "Camera #3": [timestamps] }
+  allIssues: [] // Full history with metadata
+};
+
+// Log time-based issue for pattern analysis
+function logIssuePattern(issueType, equipment = null, metadata = {}) {
+  const now = new Date();
+  const hour = now.getHours();
+  const day = now.toLocaleDateString('en-US', { weekday: 'long' });
+  
+  // Determine shift
+  let shift = 'day';
+  if (hour >= 22 || hour < 6) shift = 'night';
+  else if (hour >= 14 && hour < 22) shift = 'swing';
+  
+  // Store full issue data
+  const issueData = {
+    timestamp: now,
+    issueType,
+    equipment,
+    hour,
+    day,
+    shift,
+    ...metadata
+  };
+  
+  issuePatterns.allIssues.push(issueData);
+  
+  // Track by hour
+  if (!issuePatterns.byHour[hour]) {
+    issuePatterns.byHour[hour] = {};
+  }
+  if (!issuePatterns.byHour[hour][issueType]) {
+    issuePatterns.byHour[hour][issueType] = 0;
+  }
+  issuePatterns.byHour[hour][issueType]++;
+  
+  // Track by day
+  if (!issuePatterns.byDay[day]) {
+    issuePatterns.byDay[day] = {};
+  }
+  if (!issuePatterns.byDay[day][issueType]) {
+    issuePatterns.byDay[day][issueType] = 0;
+  }
+  issuePatterns.byDay[day][issueType]++;
+  
+  // Track by shift
+  issuePatterns.byShift[shift].issues.push(issueData);
+  
+  // Track by equipment
+  if (equipment) {
+    if (!issuePatterns.byEquipment[equipment]) {
+      issuePatterns.byEquipment[equipment] = [];
+    }
+    issuePatterns.byEquipment[equipment].push(now);
+  }
+  
+  console.log(`⏰ Pattern logged: ${issueType} at ${hour}:00 on ${day} (${shift} shift)`);
+}
+
+// 📋 DAILY HANDOFF BUFFER: Store handoffs for 6am consolidated report
+const dailyHandoffBuffer = {
+  date: new Date().toDateString(),
+  handoffs: [] // Stores all handoffs for the day
+};
+
+// Reset buffer at 6am
+function resetDailyHandoffBuffer() {
+  dailyHandoffBuffer.date = new Date().toDateString();
+  dailyHandoffBuffer.handoffs = [];
+}
+
+
 // ⚡ RESPONSE SPEED ANALYTICS: Track guard alertness and engagement
 const responseSpeedTracking = {
   guards: new Map(), // Per-guard response time data
@@ -879,12 +961,162 @@ function scheduleWeeklyAnalytics() {
   }, 60 * 1000); // Check every minute
 }
 
+// 📋 CONSOLIDATED HANDOFF REPORT: Send at 6am PST with all 3 shifts
+async function sendConsolidatedHandoffReport() {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    console.log('Email not configured - skipping handoff report');
+    return;
+  }
+  
+  // Organize handoffs by shift type
+  const shifts = {
+    Day: { expected: false, handoffs: [] },
+    Swing: { expected: false, handoffs: [] },
+    Midnight: { expected: false, handoffs: [] }
+  };
+  
+  // Check what shifts should have happened in last 24 hours
+  const now = new Date();
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  
+  // Day shift (6am yesterday) - should have ended around 2pm yesterday
+  shifts.Day.expected = true;
+  
+  // Swing shift (2pm yesterday) - should have ended around 10pm yesterday
+  shifts.Swing.expected = true;
+  
+  // Midnight shift (10pm yesterday) - should have ended around 6am today
+  shifts.Midnight.expected = true;
+  
+  // Organize buffered handoffs by shift
+  dailyHandoffBuffer.handoffs.forEach(handoff => {
+    if (shifts[handoff.shiftType]) {
+      shifts[handoff.shiftType].handoffs.push(handoff);
+    }
+  });
+  
+  // Build email
+  const dateStr = yesterday.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+  const subject = `📋 Shift Handoff Report - ${dateStr}`;
+  
+  let htmlContent = `
+    <h2>📋 Shift Handoff Report</h2>
+    <p><strong>Period:</strong> ${dateStr} 6:00 AM to ${now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} 6:00 AM</p>
+    <hr>
+  `;
+  
+  // Report each shift
+  ['Day', 'Swing', 'Midnight'].forEach(shiftName => {
+    const shift = shifts[shiftName];
+    const completedHandoffs = shift.handoffs.filter(h => h.completed);
+    const skippedHandoffs = shift.handoffs.filter(h => h.skipped);
+    
+    let shiftTime = '';
+    if (shiftName === 'Day') shiftTime = '6:00 AM - 2:00 PM';
+    if (shiftName === 'Swing') shiftTime = '2:00 PM - 10:00 PM';
+    if (shiftName === 'Midnight') shiftTime = '10:00 PM - 6:00 AM';
+    
+    htmlContent += `<h3>${shiftName} Shift (${shiftTime})</h3>`;
+    
+    if (completedHandoffs.length > 0) {
+      // Handoff completed
+      const handoff = completedHandoffs[0];
+      const guardLast4 = handoff.guardPhone.slice(-4);
+      const time = handoff.timestamp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      
+      htmlContent += `
+        <div style="background: #d4edda; padding: 10px; border-left: 4px solid #28a745; margin-bottom: 15px;">
+          <p><strong>✅ HANDOFF COMPLETED</strong></p>
+          <p><strong>Guard:</strong> ...${guardLast4}</p>
+          <p><strong>Time:</strong> ${time}</p>
+      `;
+      
+      if (handoff.issues && handoff.issues.length > 0) {
+        htmlContent += `
+          <p><strong>⚠️ Issues Reported:</strong></p>
+          <ul>
+        `;
+        handoff.issues.forEach(issue => {
+          htmlContent += `<li>${issue}</li>`;
+        });
+        htmlContent += `</ul>`;
+      } else {
+        htmlContent += `<p><strong>✅ No issues reported</strong></p>`;
+      }
+      
+      // Show handoff details
+      if (handoff.data) {
+        htmlContent += `
+          <p><strong>Handoff Details:</strong></p>
+          <ul>
+            <li>📱 Phone: ${handoff.data.phoneLocation}, ${handoff.data.phoneVolume} volume, ${handoff.data.phoneCharge} charge</li>
+            <li>📹 Cameras: ${handoff.data.cameraStatus}</li>
+            <li>🚪 Gate: ${handoff.data.gateStatus}</li>
+            <li>📝 Notes: ${handoff.data.notes || 'None'}</li>
+          </ul>
+        `;
+      }
+      
+      htmlContent += `</div>`;
+      
+    } else if (skippedHandoffs.length > 0) {
+      // Handoff skipped
+      const handoff = skippedHandoffs[0];
+      const guardLast4 = handoff.guardPhone.slice(-4);
+      const time = handoff.timestamp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      
+      htmlContent += `
+        <div style="background: #fff3cd; padding: 10px; border-left: 4px solid #ffc107; margin-bottom: 15px;">
+          <p><strong>⚠️ HANDOFF SKIPPED</strong></p>
+          <p><strong>Guard:</strong> ...${guardLast4}</p>
+          <p><strong>Time:</strong> ${time}</p>
+          <p><strong>Action:</strong> Guard chose to skip handoff checklist</p>
+        </div>
+      `;
+      
+    } else {
+      // No handoff recorded
+      htmlContent += `
+        <div style="background: #f8d7da; padding: 10px; border-left: 4px solid #dc3545; margin-bottom: 15px;">
+          <p><strong>❌ NO HANDOFF RECORDED</strong></p>
+          <p>No handoff was performed for this shift.</p>
+          <p><strong>Action:</strong> Follow up with ${shiftName} shift guard</p>
+        </div>
+      `;
+    }
+  });
+  
+  htmlContent += `
+    <hr>
+    <p><em>This report is automatically generated at 6:00 AM PST daily.</em></p>
+  `;
+  
+  try {
+    await emailTransporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: CONFIG.OWNER_EMAIL,
+      subject: subject,
+      html: htmlContent
+    });
+    console.log(`📧 Consolidated handoff report sent for ${dateStr}`);
+    
+    // Reset the buffer after sending
+    resetDailyHandoffBuffer();
+    
+  } catch (error) {
+    console.error('Error sending consolidated handoff report:', error);
+  }
+}
+
 // DAILY DIGEST: Send the summary email
 async function sendDailyDigestEmail() {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
     console.log('Email not configured - skipping daily digest');
     return;
   }
+  
+  // Send consolidated handoff report
+  await sendConsolidatedHandoffReport();
   
   const totalTasks = dailyTasks.resolved.length + dailyTasks.escalated.length + dailyTasks.abandoned.length;
   
@@ -2530,26 +2762,27 @@ async function handleHandoffResponse(guardPhone, message, handoffState) {
     // This prevents "Normal", "Nothing", "Known" from triggering skip
     activeHandoffs.delete(guardPhone);
     
-    // Send alert email about skipped handoff
-    if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
-      try {
-        await emailTransporter.sendMail({
-          from: process.env.EMAIL_USER,
-          to: CONFIG.OWNER_EMAIL,
-          subject: `⚠️ Handoff SKIPPED - Guard ...${guardPhone.slice(-4)}`,
-          html: `
-            <h2>⚠️ HANDOFF SKIPPED</h2>
-            <p><strong>Guard:</strong> ...${guardPhone.slice(-4)}</p>
-            <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
-            <p>Guard chose to skip the handoff checklist.</p>
-          `
-        });
-      } catch (error) {
-        console.error('Error sending skipped handoff email:', error);
-      }
-    }
+    // Determine shift type
+    const hour = new Date().getHours();
+    let shiftType = 'Day';
+    if (hour >= 22 || hour < 6) shiftType = 'Midnight';
+    else if (hour >= 14 && hour < 22) shiftType = 'Swing';
+    else if (hour >= 6 && hour < 14) shiftType = 'Day';
+    
+    // Store skipped handoff in daily buffer
+    dailyHandoffBuffer.handoffs.push({
+      guardPhone,
+      shiftType,
+      timestamp: new Date(),
+      completed: false,
+      skipped: true,
+      data: null,
+      stats: null,
+      issues: ['Handoff skipped by guard']
+    });
     
     await sendSMS(guardPhone, "Handoff skipped. Have a good one - but please do handoffs in the future for accountability!");
+    console.log(`⚠️ Handoff skipped by guard ...${guardPhone.slice(-4)} (${shiftType} shift)`);
     return null;
   }
   
@@ -2716,8 +2949,23 @@ async function completeHandoff(guardPhone, handoffData) {
   // Log handoff
   logHandoff(guardPhone, handoffData);
   
-  // Send completion email to owner
-  await sendHandoffCompletionEmail(guardPhone, handoffData, shiftStats);
+  // Determine shift type based on time
+  const hour = new Date().getHours();
+  let shiftType = 'Day';
+  if (hour >= 22 || hour < 6) shiftType = 'Midnight';
+  else if (hour >= 14 && hour < 22) shiftType = 'Swing';
+  else if (hour >= 6 && hour < 14) shiftType = 'Day';
+  
+  // Store in daily buffer for 6am consolidated report
+  dailyHandoffBuffer.handoffs.push({
+    guardPhone,
+    shiftType,
+    timestamp: new Date(),
+    completed: true,
+    data: handoffData,
+    stats: shiftStats,
+    issues: detectHandoffIssues(handoffData)
+  });
   
   // Send confirmation to outgoing guard
   await sendSMS(guardPhone, 
@@ -2725,7 +2973,34 @@ async function completeHandoff(guardPhone, handoffData) {
     "Incoming guard will be briefed. Stay safe!"
   );
   
-  console.log(`📋 Handoff completed for guard ...${guardPhone.slice(-4)}`);
+  console.log(`📋 Handoff completed for guard ...${guardPhone.slice(-4)} (${shiftType} shift)`);
+}
+
+// Detect issues from handoff data
+function detectHandoffIssues(handoffData) {
+  const issues = [];
+  
+  if (handoffData.phoneVolume && handoffData.phoneVolume.toLowerCase() !== 'yes') {
+    issues.push('Phone volume not all the way up');
+  }
+  
+  if (handoffData.phoneCharge && !handoffData.phoneCharge.includes('50')) {
+    issues.push(`Phone charge low: ${handoffData.phoneCharge}`);
+  }
+  
+  if (handoffData.cameraStatus && !handoffData.cameraStatus.toLowerCase().includes('clear')) {
+    issues.push(`Camera issue: ${handoffData.cameraStatus}`);
+  }
+  
+  if (handoffData.gateStatus && !handoffData.gateStatus.toLowerCase().includes('normal')) {
+    issues.push(`Gate issue: ${handoffData.gateStatus}`);
+  }
+  
+  if (handoffData.notes && handoffData.notes.toLowerCase() !== 'none' && handoffData.notes.toLowerCase() !== 'nothing') {
+    issues.push(`Note: ${handoffData.notes}`);
+  }
+  
+  return issues;
 }
 
 // Send briefing to incoming guard (call this when new guard first texts in)
@@ -2922,6 +3197,13 @@ async function handleConversation(guardPhone, message) {
             detectHandoffDiscrepancy(guardPhone, issueType, detected.issue);
           }
           
+          // ⏰ LOG TIME-BASED PATTERN
+          logIssuePattern(detected.issue, issueType ? `${issueType} equipment` : 'unknown equipment', {
+            guardPhone: guardPhone.slice(-4),
+            detectionMethod: 'AI',
+            originalMessage: message
+          });
+          
           state = {
             active: true,
             currentStep: 1,
@@ -3003,6 +3285,13 @@ async function handleConversation(guardPhone, message) {
       if (issueType) {
         detectHandoffDiscrepancy(guardPhone, issueType, detectedSOP.issue);
       }
+      
+      // ⏰ LOG TIME-BASED PATTERN
+      logIssuePattern(detectedSOP.issue, issueType ? `${issueType} equipment` : 'unknown equipment', {
+        guardPhone: guardPhone.slice(-4),
+        detectionMethod: 'Pattern matching',
+        originalMessage: message
+      });
       
       state = {
         active: true,
