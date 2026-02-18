@@ -158,22 +158,22 @@ function isReportTrigger(message) {
   
   // Explicit report triggers
   if (REPORT_TRIGGERS.some(trigger => lower.includes(trigger))) {
-    return true;
+    return null;
   }
   
   // Equipment/supply request patterns
   if (lower.match(/need (new|a|another|more|replacement)/i)) {
-    return true;
+    return null;
   }
   
   // Facility issue patterns (light out, door broken, etc.)
   if (lower.match(/(light|door|window|lock|gate|fence|camera|water|power|bathroom|toilet|sink|hvac|ac|heat|elevator)\s+(is|are)?\s*(out|broken|down|stuck|leaking|not working)/i)) {
-    return true;
+    return null;
   }
   
   // Incident patterns (found something, there's a problem)
   if (lower.match(/(found|discovered|noticed|saw)\s+(a|an|some)?\s*(broken|damaged|issue|problem)/i)) {
-    return true;
+    return null;
   }
   
   return false;
@@ -671,7 +671,7 @@ async function handleProactiveCheckResponse(guardPhone, message) {
     await sendSMS(guardPhone, "Great! Keep up the good work 👍");
     pendingChecks.delete(guardPhone);
     console.log(`✅ Proactive check passed: ${pending.system}`);
-    return true;
+    return true; // Handled - don't process further
   }
   
   if (isNegative) {
@@ -697,7 +697,7 @@ async function handleProactiveCheckResponse(guardPhone, message) {
   
   // Unclear response - ask for clarification
   await sendSMS(guardPhone, "Just to confirm - is everything OK with that system? (Reply YES if good, or describe the issue)");
-  return true;
+  return true; // Handled - don't process further
 }
 
 // Proactive check scheduler - runs every 30 minutes
@@ -832,13 +832,13 @@ function isSignOffMessage(message) {
   
   // Check if the ENTIRE message is a sign-off phrase
   if (SIGNOFF_TRIGGERS.includes(lower)) {
-    return true;
+    return null;
   }
   
   // For multi-word triggers, use includes (safe for longer phrases)
   const multiWordTriggers = SIGNOFF_TRIGGERS.filter(t => t.includes(' '));
   if (multiWordTriggers.some(trigger => lower.includes(trigger))) {
-    return true;
+    return null;
   }
   
   // For single-word triggers, use word boundary matching (prevents "water is out" matching "out")
@@ -2078,7 +2078,7 @@ async function startReportProcess(guardPhone, initialMessage = null) {
 // Handle report submission flow
 async function handleReportResponse(guardPhone, message) {
   const reportState = activeReports.get(guardPhone);
-  if (!reportState) return false;
+  if (!reportState) return null; // Not in report process
   
   const messageLower = message.toLowerCase().trim();
   
@@ -2096,7 +2096,7 @@ async function handleReportResponse(guardPhone, message) {
     
     if (!selectedType) {
       await sendSMS(guardPhone, "Please reply with a number 1-5");
-      return true;
+      return null;
     }
     
     reportState.type = selectedType;
@@ -2107,7 +2107,7 @@ async function handleReportResponse(guardPhone, message) {
     // Ask first question
     const firstQuestion = REPORT_TYPES[selectedType].questions[0];
     await sendSMS(guardPhone, firstQuestion.question);
-    return true;
+    return null;
   }
   
   // Gathering details
@@ -2126,7 +2126,7 @@ async function handleReportResponse(guardPhone, message) {
       activeReports.set(guardPhone, reportState);
       const nextQuestion = reportType.questions[reportState.currentQuestion];
       await sendSMS(guardPhone, nextQuestion.question);
-      return true;
+      return null;
     } else {
       // All questions answered - ask about photo
       reportState.step = 'photo_option';
@@ -2135,7 +2135,7 @@ async function handleReportResponse(guardPhone, message) {
         "Want to attach a photo?\n\n" +
         "Send a photo now, or reply 'Skip' to continue without one."
       );
-      return true;
+      return null;
     }
   }
   
@@ -2144,10 +2144,10 @@ async function handleReportResponse(guardPhone, message) {
     if (messageLower === 'skip' || messageLower === 'no') {
       // Generate and show report
       await generateAndShowReport(guardPhone, reportState);
-      return true;
+      return null;
     } else {
       await sendSMS(guardPhone, "Please send a photo or reply 'Skip'");
-      return true;
+      return null;
     }
   }
   
@@ -2172,7 +2172,7 @@ async function handleReportResponse(guardPhone, message) {
         "Management will receive your professional report via email. " +
         "You'll get a confirmation shortly."
       );
-      return true;
+      return null;
     } else if (messageLower === 'edit' || messageLower === 'change') {
       reportState.step = 'editing';
       activeReports.set(guardPhone, reportState);
@@ -2182,11 +2182,11 @@ async function handleReportResponse(guardPhone, message) {
         "\"Size: XL\" or \"Urgency: ASAP\"\n\n" +
         "Or reply 'Cancel' to go back."
       );
-      return true;
+      return null;
     } else if (messageLower === 'cancel') {
       activeReports.delete(guardPhone);
       await sendSMS(guardPhone, "Report cancelled. Text me anytime to start a new one!");
-      return true;
+      return null;
     } else {
       await sendSMS(guardPhone, 
         "Reply:\n" +
@@ -2194,7 +2194,7 @@ async function handleReportResponse(guardPhone, message) {
         "• 'Edit' to make changes\n" +
         "• 'Cancel' to cancel"
       );
-      return true;
+      return null;
     }
   }
   
@@ -2203,7 +2203,7 @@ async function handleReportResponse(guardPhone, message) {
     if (messageLower === 'cancel') {
       // Go back to approval
       await generateAndShowReport(guardPhone, reportState);
-      return true;
+      return null;
     }
     
     // Parse edit (simple approach: "field: value")
@@ -2223,17 +2223,17 @@ async function handleReportResponse(guardPhone, message) {
         reportState.data[matchingQuestion.field] = newValue;
         activeReports.set(guardPhone, reportState);
         await sendSMS(guardPhone, `✅ Updated ${matchingQuestion.field}!\n\nAny other changes? Or reply 'Done' to see updated report.`);
-        return true;
+        return null;
       }
     }
     
     if (messageLower === 'done') {
       await generateAndShowReport(guardPhone, reportState);
-      return true;
+      return null;
     }
     
     await sendSMS(guardPhone, "Format: \"Field: New Value\" or reply 'Done' when finished editing");
-    return true;
+    return null;
   }
   
   return false;
@@ -2630,19 +2630,21 @@ async function handleConversation(guardPhone, message) {
   // 🔔 CHECK IF RESPONDING TO PROACTIVE SITE CHECK
   const handledByProactive = await handleProactiveCheckResponse(guardPhone, message);
   if (handledByProactive) {
-    return null; // Already handled, don't process further
+    return null; // Already handled via SMS, don't send Twilio response
   }
   
   // 📋 CHECK IF IN HANDOFF PROCESS
   const handoffState = activeHandoffs.get(guardPhone);
   if (handoffState) {
-    return await handleHandoffResponse(guardPhone, message, handoffState);
+    await handleHandoffResponse(guardPhone, message, handoffState);
+    return null; // Handled via SMS
   }
   
   // 📋 CHECK IF IN REPORT SUBMISSION PROCESS
   const reportState = activeReports.get(guardPhone);
   if (reportState) {
-    return await handleReportResponse(guardPhone, message);
+    await handleReportResponse(guardPhone, message);
+    return null; // Handled via SMS
   }
   
   // 📋 CHECK IF STARTING A REPORT
@@ -2902,15 +2904,22 @@ app.post('/sms', async (req, res) => {
       const twiml = new twilio.twiml.MessagingResponse();
       twiml.message(response);
       res.type('text/xml').send(twiml.toString());
-      console.log(`📤 Response sent: ${response.substring(0, 50)}...`);
+      
+      // Safe logging - handle non-string responses
+      const responseStr = typeof response === 'string' ? response : JSON.stringify(response);
+      console.log(`📤 Response sent: ${responseStr.substring(0, 50)}...`);
     } else {
       res.sendStatus(200);
     }
   } catch (error) {
     console.error('❌ Error:', error);
-    const twiml = new twilio.twiml.MessagingResponse();
-    twiml.message("Sorry, I'm having technical difficulties. Text your supervisor.");
-    res.type('text/xml').send(twiml.toString());
+    
+    // Only send error response if headers haven't been sent
+    if (!res.headersSent) {
+      const twiml = new twilio.twiml.MessagingResponse();
+      twiml.message("Sorry, I'm having technical difficulties. Text your supervisor.");
+      res.type('text/xml').send(twiml.toString());
+    }
   }
 });
 
