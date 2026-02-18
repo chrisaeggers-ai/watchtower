@@ -2274,6 +2274,7 @@ Please rewrite this as a professional ${reportType.name.toLowerCase()}.`;
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY || "",
         "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
@@ -2290,6 +2291,13 @@ Please rewrite this as a professional ${reportType.name.toLowerCase()}.`;
     });
 
     const data = await response.json();
+    
+    // Check if response is valid
+    if (!data.content || !data.content[0] || !data.content[0].text) {
+      console.error('Invalid Claude API response:', JSON.stringify(data));
+      throw new Error('Invalid API response format');
+    }
+    
     const professionalReport = data.content[0].text.trim();
     
     reportState.professionalVersion = professionalReport;
@@ -2319,8 +2327,53 @@ Reply:
     
   } catch (error) {
     console.error('Error generating professional report:', error);
-    await sendSMS(guardPhone, "Error generating report. Please try again or contact support.");
+    console.error('Report data:', JSON.stringify(reportState.data));
+    
+    // Fallback - create a simple professional report without AI
+    const fallbackReport = createFallbackReport(reportType, reportState.data, guardPhone);
+    
+    reportState.professionalVersion = fallbackReport;
+    reportState.step = 'approval';
+    activeReports.set(guardPhone, reportState);
+    
+    // Show formatted report to guard
+    const formattedReport = `
+━━━━━━━━━━━━━━━━━━━━━
+📋 YOUR PROFESSIONAL REPORT
+━━━━━━━━━━━━━━━━━━━━━
+
+${fallbackReport}
+
+━━━━━━━━━━━━━━━━━━━━━
+ORIGINAL NOTES:
+${rawData}━━━━━━━━━━━━━━━━━━━━━
+
+Send this to management?
+
+Reply:
+• 'Yes' to send
+• 'Edit' to make changes
+• 'Cancel' to cancel`;
+
+    await sendSMS(guardPhone, formattedReport);
   }
+}
+
+// Fallback report creator (when AI fails)
+function createFallbackReport(reportType, data, guardPhone) {
+  const now = new Date();
+  const guardLast4 = guardPhone.slice(-4);
+  
+  let report = `${reportType.name.toUpperCase()}\n\n`;
+  report += `Date: ${now.toLocaleDateString()} ${now.toLocaleTimeString()}\n`;
+  report += `Submitted by: Guard (Phone ending in ${guardLast4})\n\n`;
+  
+  Object.entries(data).forEach(([field, value]) => {
+    const fieldName = field.charAt(0).toUpperCase() + field.slice(1).replace(/([A-Z])/g, ' $1');
+    report += `${fieldName}: ${value}\n`;
+  });
+  
+  return report;
 }
 
 // Send report email to management
