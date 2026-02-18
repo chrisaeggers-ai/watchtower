@@ -158,22 +158,22 @@ function isReportTrigger(message) {
   
   // Explicit report triggers
   if (REPORT_TRIGGERS.some(trigger => lower.includes(trigger))) {
-    return null;
+    return true;
   }
   
   // Equipment/supply request patterns
   if (lower.match(/need (new|a|another|more|replacement)/i)) {
-    return null;
+    return true;
   }
   
   // Facility issue patterns (light out, door broken, etc.)
   if (lower.match(/(light|door|window|lock|gate|fence|camera|water|power|bathroom|toilet|sink|hvac|ac|heat|elevator)\s+(is|are)?\s*(out|broken|down|stuck|leaking|not working)/i)) {
-    return null;
+    return true;
   }
   
   // Incident patterns (found something, there's a problem)
   if (lower.match(/(found|discovered|noticed|saw)\s+(a|an|some)?\s*(broken|damaged|issue|problem)/i)) {
-    return null;
+    return true;
   }
   
   return false;
@@ -832,13 +832,13 @@ function isSignOffMessage(message) {
   
   // Check if the ENTIRE message is a sign-off phrase
   if (SIGNOFF_TRIGGERS.includes(lower)) {
-    return null;
+    return true;
   }
   
   // For multi-word triggers, use includes (safe for longer phrases)
   const multiWordTriggers = SIGNOFF_TRIGGERS.filter(t => t.includes(' '));
   if (multiWordTriggers.some(trigger => lower.includes(trigger))) {
-    return null;
+    return true;
   }
   
   // For single-word triggers, use word boundary matching (prevents "water is out" matching "out")
