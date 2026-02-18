@@ -2761,6 +2761,101 @@ async function sendIncomingGuardBriefing(guardPhone) {
 // MAIN CONVERSATION HANDLER (CAUTIOUS + SKIP)
 // ==========================================
 
+// ==========================================
+// AI-POWERED NATURAL LANGUAGE UNDERSTANDING
+// ==========================================
+
+// Master AI router - detects what the guard is trying to do
+async function detectGuardIntent(message) {
+  const prompt = `You are analyzing a security guard's text message to determine their intent.
+
+Guard message: "${message}"
+
+Classify into ONE of these categories:
+
+SIGN_OFF - Guard is ending their shift, signing off, or leaving work NOW
+Examples: "signing off", "shift over", "im done", "heading out", "bye", "singning off" (typo), "my shift just ended"
+
+EQUIPMENT_ISSUE - Equipment is broken, malfunctioning, or down NOW
+Examples: "cameras down", "camerass broken" (typo), "gate stuck", "gate wont open", "cameras not working"
+
+REPORT - Non-urgent report about supplies, facilities, or incidents (not equipment failure)
+Examples: "need new uniform", "water is out", "light broken", "found broken window", "out of pens"
+
+NEED_SUPERVISOR - Requesting human help, supervisor contact, or urgent coordination
+Examples: "need supervisor", "my relief is late", "need help", "can someone come here"
+
+QUESTION - Asking a question about how to do something
+Examples: "how do I sign out?", "what should I do about...", "is there a procedure for..."
+
+ACTIVE_CONVERSATION - Responding to an ongoing conversation (answers like "yes", "no", "done", etc.)
+Examples: "yes", "no", "done", "fixed", "all clear", "normal", "ok"
+
+OTHER - None of the above
+
+Reply with ONLY the category name (e.g., "SIGN_OFF").`;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 20,
+      messages: [{ role: "user", content: prompt }]
+    });
+    
+    const intent = response.content[0].text.trim().toUpperCase();
+    console.log(`🤖 AI detected intent: ${intent} for message: "${message}"`);
+    return intent;
+  } catch (error) {
+    console.error('❌ AI intent detection error:', error);
+    return 'OTHER'; // Fallback to pattern matching
+  }
+}
+
+// Detect specific equipment type for equipment issues
+async function detectEquipmentIssueAI(message) {
+  const prompt = `What equipment is broken or malfunctioning?
+
+Message: "${message}"
+
+Reply with ONE of:
+CAMERA - Camera/surveillance equipment
+GATE - Gate/entrance/access control
+GENERAL - Unclear, multiple things, or other equipment
+
+Examples:
+"camerass are dwon" → CAMERA
+"cameras not working" → CAMERA
+"gate stuck" → GATE
+"entrance wont open" → GATE
+"everything broken" → GENERAL
+"security system down" → GENERAL
+
+Reply with ONLY the equipment type.`;
+
+  try {
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 20,
+      messages: [{ role: "user", content: prompt }]
+    });
+    
+    const equipment = response.content[0].text.trim().toUpperCase();
+    console.log(`🤖 AI detected equipment: ${equipment}`);
+    
+    // Return appropriate SOP
+    if (equipment === 'CAMERA') return detectSOP("cameras down");
+    if (equipment === 'GATE') return detectSOP("gate stuck");
+    return detectSOP("general assistance");
+  } catch (error) {
+    console.error('❌ AI equipment detection error:', error);
+    return null; // Fallback to pattern matching
+  }
+}
+
+// ==========================================
+// MAIN CONVERSATION HANDLER
+// ==========================================
+
 async function handleConversation(guardPhone, message) {
   // 🔔 UPDATE LAST CONTACT: Track when guard last messaged
   guardLastContact.set(guardPhone, Date.now());
@@ -2789,16 +2884,6 @@ async function handleConversation(guardPhone, message) {
     return null; // Handled via SMS
   }
   
-  // 📋 CHECK IF STARTING A REPORT
-  if (isReportTrigger(message)) {
-    return await startReportProcess(guardPhone, message);
-  }
-  
-  // 📋 CHECK IF SIGNING OFF (START HANDOFF)
-  if (isSignOffMessage(message)) {
-    return await startHandoffProcess(guardPhone);
-  }
-  
   let state = conversationState.get(guardPhone) || {
     active: false,
     currentStep: 0,
@@ -2814,34 +2899,116 @@ async function handleConversation(guardPhone, message) {
   state.conversationHistory = state.conversationHistory || [];
   state.conversationHistory.push({ role: 'guard', content: message });
 
-  // Check for escalation request at any time (catches "my relief is late", "need supervisor", etc.)
-  if (isEscalationRequest(message)) {
-    // Don't escalate via SMS - tell them to CALL instead
-    await tellGuardToCall(guardPhone, message);
-    if (state.active) {
-      conversationState.delete(guardPhone);
-      abandonmentAlertsSent.delete(guardPhone);
-    }
-    return null;
-  }
-
-  // NEW CONVERSATION - Detect issue
+  // 🤖 AI-POWERED INTENT DETECTION (for NEW conversations only)
   if (!state.active) {
-    const detected = detectSOP(message);
+    console.log(`🤖 Using AI to detect intent for: "${message}"`);
+    const intent = await detectGuardIntent(message);
     
-    if (detected) {
-      // 📋 Check for handoff discrepancy (incoming guard reports issue that outgoing said was fine)
-      const issueType = detected.issue.toLowerCase().includes('camera') ? 'camera' :
-                        detected.issue.toLowerCase().includes('gate') ? 'gate' : null;
+    // Route based on AI-detected intent
+    switch(intent) {
+      case 'SIGN_OFF':
+        console.log(`✅ AI detected: SIGN_OFF`);
+        return await startHandoffProcess(guardPhone);
+        
+      case 'EQUIPMENT_ISSUE':
+        console.log(`✅ AI detected: EQUIPMENT_ISSUE`);
+        const detected = await detectEquipmentIssueAI(message);
+        
+        if (detected) {
+          // Check for handoff discrepancy
+          const issueType = detected.issue.toLowerCase().includes('camera') ? 'camera' :
+                            detected.issue.toLowerCase().includes('gate') ? 'gate' : null;
+          if (issueType) {
+            detectHandoffDiscrepancy(guardPhone, issueType, detected.issue);
+          }
+          
+          state = {
+            active: true,
+            currentStep: 1,
+            issue: detected.issue,
+            activeSOP: detected.sop,
+            retries: 0,
+            completedSteps: [],
+            startTime: new Date(),
+            lastActivity: Date.now(),
+            conversationHistory: [{ role: 'guard', content: message }]
+          };
+          conversationState.set(guardPhone, state);
+          abandonmentAlertsSent.delete(guardPhone);
+          
+          const firstStep = detected.sop.steps[0];
+          const imageUrl = firstStep.image ? `${CONFIG.SERVER_URL}/images/${firstStep.image}` : null;
+          
+          state.conversationHistory.push({ role: 'watchtower', content: firstStep.userFriendly });
+          await sendSMS(guardPhone, firstStep.userFriendly, imageUrl);
+          return null;
+        }
+        // If AI detection failed, fall through to pattern matching
+        break;
+        
+      case 'REPORT':
+        console.log(`✅ AI detected: REPORT`);
+        return await startReportProcess(guardPhone, message);
+        
+      case 'NEED_SUPERVISOR':
+        console.log(`✅ AI detected: NEED_SUPERVISOR`);
+        await tellGuardToCall(guardPhone, message);
+        return null;
+        
+      case 'QUESTION':
+        console.log(`✅ AI detected: QUESTION - using handbook`);
+        // Use AI handbook knowledge for questions
+        break;
+        
+      case 'ACTIVE_CONVERSATION':
+        console.log(`⚠️ AI detected: ACTIVE_CONVERSATION but no active state - treating as OTHER`);
+        // Fall through to pattern matching
+        break;
+        
+      case 'OTHER':
+      default:
+        console.log(`⚠️ AI returned: ${intent} - falling back to pattern matching`);
+        // Fall through to existing pattern matching as backup
+        break;
+    }
+    
+    // 🔄 FALLBACK: Pattern matching (if AI didn't handle it or returned OTHER)
+    console.log(`🔄 Trying pattern matching as fallback...`);
+    
+    // Check pattern-based triggers
+    if (isReportTrigger(message)) {
+      console.log(`✅ Pattern matching detected: REPORT`);
+      return await startReportProcess(guardPhone, message);
+    }
+    
+    if (isSignOffMessage(message)) {
+      console.log(`✅ Pattern matching detected: SIGN_OFF`);
+      return await startHandoffProcess(guardPhone);
+    }
+    
+    if (isEscalationRequest(message)) {
+      console.log(`✅ Pattern matching detected: ESCALATION`);
+      await tellGuardToCall(guardPhone, message);
+      return null;
+    }
+    
+    // Try SOP detection
+    const detectedSOP = detectSOP(message);
+    
+    if (detectedSOP) {
+      console.log(`✅ Pattern matching detected SOP: ${detectedSOP.issue}`);
+      // Check for handoff discrepancy (incoming guard reports issue that outgoing said was fine)
+      const issueType = detectedSOP.issue.toLowerCase().includes('camera') ? 'camera' :
+                        detectedSOP.issue.toLowerCase().includes('gate') ? 'gate' : null;
       if (issueType) {
-        detectHandoffDiscrepancy(guardPhone, issueType, detected.issue);
+        detectHandoffDiscrepancy(guardPhone, issueType, detectedSOP.issue);
       }
       
       state = {
         active: true,
         currentStep: 1,
-        issue: detected.issue,
-        activeSOP: detected.sop,
+        issue: detectedSOP.issue,
+        activeSOP: detectedSOP.sop,
         retries: 0,
         completedSteps: [],
         startTime: new Date(),
@@ -2851,7 +3018,7 @@ async function handleConversation(guardPhone, message) {
       conversationState.set(guardPhone, state);
       abandonmentAlertsSent.delete(guardPhone); // Clear any previous alert flag
       
-      const firstStep = detected.sop.steps[0];
+      const firstStep = detectedSOP.sop.steps[0];
       const imageUrl = firstStep.image ? `${CONFIG.SERVER_URL}/images/${firstStep.image}` : null;
       
       state.conversationHistory.push({ role: 'watchtower', content: firstStep.userFriendly });
@@ -2905,6 +3072,15 @@ RESPONSE RULES:
     // Update last activity timestamp (for abandonment detection)
     state.lastActivity = Date.now();
     conversationState.set(guardPhone, state);
+    
+    // Check for escalation request during active conversation
+    if (isEscalationRequest(message)) {
+      console.log(`✅ Escalation requested during active SOP`);
+      await tellGuardToCall(guardPhone, message);
+      conversationState.delete(guardPhone);
+      abandonmentAlertsSent.delete(guardPhone);
+      return null;
+    }
     
     const currentStepObj = state.activeSOP.steps[state.currentStep - 1];
     
