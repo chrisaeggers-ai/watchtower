@@ -135,12 +135,21 @@ const REPORT_TYPES = {
 
 // Report trigger phrases
 const REPORT_TRIGGERS = [
+  // Explicit report phrases
   "i need to submit a report", "submit a report", "send a report",
   "i want to report", "need to report", "report:",
   "i have a report", "create a report", "make a report",
   "file a report", "submit report", "send report",
+  
+  // Equipment/supply requests
   "i need", "we need", "request for", "can i get",
-  "need new", "need a", "need more"
+  "need new", "need a", "need more",
+  
+  // Facility/incident issues
+  "is out", "are out", "went out", "is broken", "are broken",
+  "is down", "are down", "not working", "doesn't work", "dont work",
+  "is stuck", "won't close", "wont close", "won't open", "wont open",
+  "is leaking", "water leak", "found", "there's a", "theres a"
 ];
 
 // Check if message is a report trigger
@@ -154,6 +163,16 @@ function isReportTrigger(message) {
   
   // Equipment/supply request patterns
   if (lower.match(/need (new|a|another|more|replacement)/i)) {
+    return true;
+  }
+  
+  // Facility issue patterns (light out, door broken, etc.)
+  if (lower.match(/(light|door|window|lock|gate|fence|camera|water|power|bathroom|toilet|sink|hvac|ac|heat|elevator)\s+(is|are)?\s*(out|broken|down|stuck|leaking|not working)/i)) {
+    return true;
+  }
+  
+  // Incident patterns (found something, there's a problem)
+  if (lower.match(/(found|discovered|noticed|saw)\s+(a|an|some)?\s*(broken|damaged|issue|problem)/i)) {
     return true;
   }
   
@@ -757,7 +776,7 @@ const SIGNOFF_TRIGGERS = [
   "logging off", "log off", "logged off",
   "wrapping up", "wrapping out", "done for the day", "done for the night",
   "taking off", "out for the night", "im out", "i'm out",
-  "bye", "later", "ttyl", "peace", "peace out", "out", "gotta go",
+  "bye", "later", "ttyl", "peace", "peace out", "gotta go",
   "see ya", "see you", "heading home", "leaving now"
 ];
 
@@ -810,7 +829,23 @@ const HANDOFF_QUESTIONS = [
 // Check if message is a sign-off trigger
 function isSignOffMessage(message) {
   const lower = message.toLowerCase().trim();
-  return SIGNOFF_TRIGGERS.some(trigger => lower === trigger || lower.includes(trigger));
+  
+  // Check if the ENTIRE message is a sign-off phrase
+  if (SIGNOFF_TRIGGERS.includes(lower)) {
+    return true;
+  }
+  
+  // For multi-word triggers, use includes (safe for longer phrases)
+  const multiWordTriggers = SIGNOFF_TRIGGERS.filter(t => t.includes(' '));
+  if (multiWordTriggers.some(trigger => lower.includes(trigger))) {
+    return true;
+  }
+  
+  // For single-word triggers, use word boundary matching (prevents "water is out" matching "out")
+  const singleWordTriggers = SIGNOFF_TRIGGERS.filter(t => !t.includes(' '));
+  const words = lower.split(/\s+/);
+  
+  return singleWordTriggers.some(trigger => words.includes(trigger));
 }
 
 // DAILY DIGEST: Send summary email at 6am Pacific every day
