@@ -84,6 +84,82 @@ const responseSpeedTracking = {
   allResponses: []    // All response events for pattern analysis
 };
 
+// 📋 GUARD REPORT SYSTEM: Conversational professional report submission
+const activeReports = new Map(); // Guards currently creating reports
+const submittedReports = []; // All submitted reports for analytics
+
+// Report types and their detail-gathering questions
+const REPORT_TYPES = {
+  equipment: {
+    name: 'Equipment/Uniform Request',
+    questions: [
+      { field: 'item', question: "What equipment or uniform item do you need?" },
+      { field: 'size', question: "What size? (Reply 'N/A' if not applicable)", optional: true },
+      { field: 'reason', question: "Why do you need this? (e.g., damaged, lost, new hire)" },
+      { field: 'urgency', question: "How urgent? Reply:\n1. ASAP (urgent)\n2. This week\n3. When convenient" }
+    ]
+  },
+  facility: {
+    name: 'Facility Issue (Non-Urgent)',
+    questions: [
+      { field: 'location', question: "Where is the issue? (e.g., parking lot, north entrance, bathroom)" },
+      { field: 'problem', question: "What's the problem?" },
+      { field: 'impact', question: "How does this affect operations? Reply:\n1. Major impact\n2. Minor inconvenience\n3. Cosmetic only" }
+    ]
+  },
+  incident: {
+    name: 'Incident Report (Non-Emergency)',
+    questions: [
+      { field: 'what', question: "What happened?" },
+      { field: 'when', question: "When did this occur? (e.g., 'just now', '2 hours ago', 'this morning')" },
+      { field: 'where', question: "Where did this occur?" },
+      { field: 'involved', question: "Anyone involved or witnessed? (Reply 'None' if not applicable)", optional: true }
+    ]
+  },
+  supply: {
+    name: 'Supply Request',
+    questions: [
+      { field: 'supplies', question: "What supplies do you need?" },
+      { field: 'quantity', question: "How many/much?" },
+      { field: 'urgency', question: "How urgent? Reply:\n1. Critical (out of stock)\n2. Running low\n3. Planning ahead" }
+    ]
+  },
+  feedback: {
+    name: 'General Feedback/Suggestion',
+    questions: [
+      { field: 'category', question: "What's this about? (e.g., tenant complaint, visitor question, safety suggestion)" },
+      { field: 'details', question: "Please provide details:" }
+    ]
+  }
+};
+
+// Report trigger phrases
+const REPORT_TRIGGERS = [
+  "i need to submit a report", "submit a report", "send a report",
+  "i want to report", "need to report", "report:",
+  "i have a report", "create a report", "make a report",
+  "file a report", "submit report", "send report",
+  "i need", "we need", "request for", "can i get",
+  "need new", "need a", "need more"
+];
+
+// Check if message is a report trigger
+function isReportTrigger(message) {
+  const lower = message.toLowerCase().trim();
+  
+  // Explicit report triggers
+  if (REPORT_TRIGGERS.some(trigger => lower.includes(trigger))) {
+    return true;
+  }
+  
+  // Equipment/supply request patterns
+  if (lower.match(/need (new|a|another|more|replacement)/i)) {
+    return true;
+  }
+  
+  return false;
+}
+
 // Initialize response tracking for a guard
 function initializeGuardResponseTracking(guardPhone) {
   if (!responseSpeedTracking.guards.has(guardPhone)) {
@@ -1269,6 +1345,66 @@ async function sendWeeklyAnalyticsEmail() {
     }
   }
   
+  // 📋 GUARD REPORTS SUBMITTED
+  const weekReports = submittedReports.filter(r => {
+    const reportDate = new Date(r.timestamp);
+    const weekStart = new Date(weeklyAnalytics.startDate);
+    return reportDate >= weekStart;
+  });
+  
+  if (weekReports.length > 0) {
+    const reportsByType = {
+      equipment: weekReports.filter(r => r.type === 'equipment').length,
+      facility: weekReports.filter(r => r.type === 'facility').length,
+      incident: weekReports.filter(r => r.type === 'incident').length,
+      supply: weekReports.filter(r => r.type === 'supply').length,
+      feedback: weekReports.filter(r => r.type === 'feedback').length
+    };
+    
+    // Count reports per guard
+    const reportsByGuard = {};
+    weekReports.forEach(r => {
+      const last4 = r.guardPhone.slice(-4);
+      reportsByGuard[last4] = (reportsByGuard[last4] || 0) + 1;
+    });
+    
+    // Sort guards by report count
+    const sortedReportingGuards = Object.entries(reportsByGuard)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5); // Top 5
+    
+    // Calculate avg submission time
+    const avgSubmissionTime = weekReports.length > 0 ?
+      Math.round(weekReports.reduce((sum, r) => sum + r.responseTime, 0) / weekReports.length / 60) : 0;
+    
+    htmlContent += `
+      <h3>📋 GUARD REPORTS SUBMITTED</h3>
+      <p><strong>Total Reports:</strong> ${weekReports.length}</p>
+      
+      <h4>Reports by Type:</h4>
+      <ul>
+        ${reportsByType.equipment > 0 ? `<li>Equipment/Uniform Requests: ${reportsByType.equipment}</li>` : ''}
+        ${reportsByType.facility > 0 ? `<li>Facility Issues: ${reportsByType.facility}</li>` : ''}
+        ${reportsByType.incident > 0 ? `<li>Incident Reports: ${reportsByType.incident}</li>` : ''}
+        ${reportsByType.supply > 0 ? `<li>Supply Requests: ${reportsByType.supply}</li>` : ''}
+        ${reportsByType.feedback > 0 ? `<li>General Feedback: ${reportsByType.feedback}</li>` : ''}
+      </ul>
+      
+      ${sortedReportingGuards.length > 0 ? `
+        <h4>Top Reporting Guards:</h4>
+        <ul>
+          ${sortedReportingGuards.map(([last4, count]) => 
+            `<li>Guard ...${last4}: ${count} report${count > 1 ? 's' : ''} ${count >= 3 ? '⭐ (engaged!)' : ''}</li>`
+          ).join('')}
+        </ul>
+      ` : ''}
+      
+      <p><strong>Avg time to submit report:</strong> ${avgSubmissionTime} min (fast!)</p>
+      <p><em>Guards are using the conversational reporting system to quickly submit professional reports</em></p>
+      <br>
+    `;
+  }
+  
   // 💰 ROI Summary - THE MONEY SECTION!
   const weekSavings = roiTracking.currentMonth.totalSavings;
   const earlyDetectionCount = roiTracking.currentMonth.earlyDetections.length;
@@ -1874,6 +2010,337 @@ If unclear, reply with "1".
 }
 
 // ==========================================
+// GUARD REPORT SYSTEM
+// ==========================================
+
+// Start the report submission process
+async function startReportProcess(guardPhone, initialMessage = null) {
+  const reportState = {
+    step: 'type_selection',
+    type: null,
+    data: {},
+    photoAttached: false,
+    startTime: Date.now(),
+    initialMessage
+  };
+  
+  activeReports.set(guardPhone, reportState);
+  
+  await sendSMS(guardPhone,
+    "📋 I'll help you submit a professional report!\n\n" +
+    "What type of report?\n\n" +
+    "1️⃣ Equipment/Uniform Request\n" +
+    "2️⃣ Facility Issue (non-urgent)\n" +
+    "3️⃣ Incident Report\n" +
+    "4️⃣ Supply Request\n" +
+    "5️⃣ General Feedback\n\n" +
+    "Reply with the number (1-5)"
+  );
+  
+  return null;
+}
+
+// Handle report submission flow
+async function handleReportResponse(guardPhone, message) {
+  const reportState = activeReports.get(guardPhone);
+  if (!reportState) return false;
+  
+  const messageLower = message.toLowerCase().trim();
+  
+  // Type selection
+  if (reportState.step === 'type_selection') {
+    const typeMap = {
+      '1': 'equipment',
+      '2': 'facility',
+      '3': 'incident',
+      '4': 'supply',
+      '5': 'feedback'
+    };
+    
+    const selectedType = typeMap[message.trim()];
+    
+    if (!selectedType) {
+      await sendSMS(guardPhone, "Please reply with a number 1-5");
+      return true;
+    }
+    
+    reportState.type = selectedType;
+    reportState.step = 'gathering';
+    reportState.currentQuestion = 0;
+    activeReports.set(guardPhone, reportState);
+    
+    // Ask first question
+    const firstQuestion = REPORT_TYPES[selectedType].questions[0];
+    await sendSMS(guardPhone, firstQuestion.question);
+    return true;
+  }
+  
+  // Gathering details
+  if (reportState.step === 'gathering') {
+    const reportType = REPORT_TYPES[reportState.type];
+    const currentQuestion = reportType.questions[reportState.currentQuestion];
+    
+    // Store answer
+    reportState.data[currentQuestion.field] = message;
+    
+    // Move to next question
+    reportState.currentQuestion++;
+    
+    if (reportState.currentQuestion < reportType.questions.length) {
+      // Ask next question
+      activeReports.set(guardPhone, reportState);
+      const nextQuestion = reportType.questions[reportState.currentQuestion];
+      await sendSMS(guardPhone, nextQuestion.question);
+      return true;
+    } else {
+      // All questions answered - ask about photo
+      reportState.step = 'photo_option';
+      activeReports.set(guardPhone, reportState);
+      await sendSMS(guardPhone, 
+        "Want to attach a photo?\n\n" +
+        "Send a photo now, or reply 'Skip' to continue without one."
+      );
+      return true;
+    }
+  }
+  
+  // Photo option
+  if (reportState.step === 'photo_option') {
+    if (messageLower === 'skip' || messageLower === 'no') {
+      // Generate and show report
+      await generateAndShowReport(guardPhone, reportState);
+      return true;
+    } else {
+      await sendSMS(guardPhone, "Please send a photo or reply 'Skip'");
+      return true;
+    }
+  }
+  
+  // Approval step
+  if (reportState.step === 'approval') {
+    if (messageLower === 'yes' || messageLower === 'send' || messageLower === 'approve') {
+      // Send report
+      await sendReportEmail(guardPhone, reportState);
+      
+      // Log for analytics
+      submittedReports.push({
+        guardPhone,
+        type: reportState.type,
+        timestamp: new Date(),
+        data: reportState.data,
+        responseTime: Math.round((Date.now() - reportState.startTime) / 1000)
+      });
+      
+      activeReports.delete(guardPhone);
+      await sendSMS(guardPhone, 
+        "✅ Report submitted successfully!\n\n" +
+        "Management will receive your professional report via email. " +
+        "You'll get a confirmation shortly."
+      );
+      return true;
+    } else if (messageLower === 'edit' || messageLower === 'change') {
+      reportState.step = 'editing';
+      activeReports.set(guardPhone, reportState);
+      await sendSMS(guardPhone, 
+        "What would you like to change?\n\n" +
+        "Type the field name and new value, like:\n" +
+        "\"Size: XL\" or \"Urgency: ASAP\"\n\n" +
+        "Or reply 'Cancel' to go back."
+      );
+      return true;
+    } else if (messageLower === 'cancel') {
+      activeReports.delete(guardPhone);
+      await sendSMS(guardPhone, "Report cancelled. Text me anytime to start a new one!");
+      return true;
+    } else {
+      await sendSMS(guardPhone, 
+        "Reply:\n" +
+        "• 'Yes' to send\n" +
+        "• 'Edit' to make changes\n" +
+        "• 'Cancel' to cancel"
+      );
+      return true;
+    }
+  }
+  
+  // Editing step
+  if (reportState.step === 'editing') {
+    if (messageLower === 'cancel') {
+      // Go back to approval
+      await generateAndShowReport(guardPhone, reportState);
+      return true;
+    }
+    
+    // Parse edit (simple approach: "field: value")
+    const editMatch = message.match(/([^:]+):\s*(.+)/);
+    if (editMatch) {
+      const fieldName = editMatch[1].trim().toLowerCase();
+      const newValue = editMatch[2].trim();
+      
+      // Find matching field
+      const reportType = REPORT_TYPES[reportState.type];
+      const matchingQuestion = reportType.questions.find(q => 
+        q.field.toLowerCase() === fieldName || 
+        q.question.toLowerCase().includes(fieldName)
+      );
+      
+      if (matchingQuestion) {
+        reportState.data[matchingQuestion.field] = newValue;
+        activeReports.set(guardPhone, reportState);
+        await sendSMS(guardPhone, `✅ Updated ${matchingQuestion.field}!\n\nAny other changes? Or reply 'Done' to see updated report.`);
+        return true;
+      }
+    }
+    
+    if (messageLower === 'done') {
+      await generateAndShowReport(guardPhone, reportState);
+      return true;
+    }
+    
+    await sendSMS(guardPhone, "Format: \"Field: New Value\" or reply 'Done' when finished editing");
+    return true;
+  }
+  
+  return false;
+}
+
+// Generate professional report using Claude AI
+async function generateAndShowReport(guardPhone, reportState) {
+  const reportType = REPORT_TYPES[reportState.type];
+  
+  // Build guard's raw data
+  let rawData = '';
+  Object.entries(reportState.data).forEach(([field, value]) => {
+    rawData += `${field}: ${value}\n`;
+  });
+  
+  // Use Claude to rewrite professionally
+  const systemPrompt = `You are a professional report writer for security operations.
+  
+Given guard-submitted information (which may be informal or have typos), rewrite it as a clean, professional report.
+
+Keep the facts accurate but make the language professional and clear.
+Format as a structured report with clear sections.
+Keep it concise but complete.
+
+Return ONLY the professional report text, no preamble.`;
+
+  const userPrompt = `Report Type: ${reportType.name}
+Guard Phone: ${guardPhone}
+Date/Time: ${new Date().toLocaleString()}
+
+Raw guard input:
+${rawData}
+
+Please rewrite this as a professional ${reportType.name.toLowerCase()}.`;
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1000,
+        messages: [
+          {
+            role: "user",
+            content: userPrompt
+          }
+        ],
+        system: systemPrompt
+      })
+    });
+
+    const data = await response.json();
+    const professionalReport = data.content[0].text.trim();
+    
+    reportState.professionalVersion = professionalReport;
+    reportState.step = 'approval';
+    activeReports.set(guardPhone, reportState);
+    
+    // Show formatted report to guard
+    const formattedReport = `
+━━━━━━━━━━━━━━━━━━━━━
+📋 YOUR PROFESSIONAL REPORT
+━━━━━━━━━━━━━━━━━━━━━
+
+${professionalReport}
+
+━━━━━━━━━━━━━━━━━━━━━
+ORIGINAL NOTES:
+${rawData}━━━━━━━━━━━━━━━━━━━━━
+
+Send this to management?
+
+Reply:
+• 'Yes' to send
+• 'Edit' to make changes
+• 'Cancel' to cancel`;
+
+    await sendSMS(guardPhone, formattedReport);
+    
+  } catch (error) {
+    console.error('Error generating professional report:', error);
+    await sendSMS(guardPhone, "Error generating report. Please try again or contact support.");
+  }
+}
+
+// Send report email to management
+async function sendReportEmail(guardPhone, reportState) {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    console.log('Email not configured - skipping report email');
+    return;
+  }
+  
+  const reportType = REPORT_TYPES[reportState.type];
+  const guardLast4 = guardPhone.slice(-4);
+  const now = new Date();
+  
+  const subject = `📋 Guard Report: ${reportType.name}`;
+  
+  let rawDataHtml = '<ul>';
+  Object.entries(reportState.data).forEach(([field, value]) => {
+    rawDataHtml += `<li><strong>${field}:</strong> ${value}</li>`;
+  });
+  rawDataHtml += '</ul>';
+  
+  const htmlContent = `
+    <h2>📋 ${reportType.name.toUpperCase()}</h2>
+    <p><strong>Submitted:</strong> ${now.toLocaleString()}</p>
+    <p><strong>Guard:</strong> Phone ending in ${guardLast4}</p>
+    <hr>
+    
+    <h3>Professional Report:</h3>
+    <div style="background: #f5f5f5; padding: 15px; border-left: 4px solid #007bff;">
+      ${reportState.professionalVersion.replace(/\n/g, '<br>')}
+    </div>
+    <hr>
+    
+    <h3>Original Guard Input:</h3>
+    ${rawDataHtml}
+    
+    <hr>
+    <p><em>This report was submitted via WatchTower conversational reporting system.</em></p>
+    <p><em>Reply to this email to respond directly to the guard.</em></p>
+  `;
+
+  try {
+    await emailTransporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: CONFIG.OWNER_EMAIL,
+      subject: subject,
+      html: htmlContent
+    });
+    console.log(`📧 Guard report sent: ${reportType.name}`);
+  } catch (error) {
+    console.error('Error sending guard report email:', error);
+  }
+}
+
+// ==========================================
 // SHIFT HANDOFF PROCESS
 // ==========================================
 
@@ -2135,6 +2602,17 @@ async function handleConversation(guardPhone, message) {
   const handoffState = activeHandoffs.get(guardPhone);
   if (handoffState) {
     return await handleHandoffResponse(guardPhone, message, handoffState);
+  }
+  
+  // 📋 CHECK IF IN REPORT SUBMISSION PROCESS
+  const reportState = activeReports.get(guardPhone);
+  if (reportState) {
+    return await handleReportResponse(guardPhone, message);
+  }
+  
+  // 📋 CHECK IF STARTING A REPORT
+  if (isReportTrigger(message)) {
+    return await startReportProcess(guardPhone, message);
   }
   
   // 📋 CHECK IF SIGNING OFF (START HANDOFF)
