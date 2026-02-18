@@ -1730,7 +1730,7 @@ async function sendSMS(to, message, imageUrl = null) {
 }
 
 // Send email report
-async function sendEmailReport(guardPhone, issue, resolved, steps) {
+async function sendEmailReport(guardPhone, issue, resolved, steps, conversationHistory = []) {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
     console.log('Email not configured - skipping report');
     return;
@@ -1739,12 +1739,36 @@ async function sendEmailReport(guardPhone, issue, resolved, steps) {
   const status = resolved ? 'RESOLVED ✅' : 'ESCALATED ⚠️';
   const subject = `WatchTower Report: ${issue} - ${status}`;
   
+  // Build conversation transcript HTML
+  let transcriptHtml = '';
+  if (conversationHistory && conversationHistory.length > 0) {
+    transcriptHtml = `
+      <hr>
+      <h3>📱 Conversation Transcript:</h3>
+      <div style="background: #f5f5f5; padding: 15px; border-left: 4px solid #007bff; font-family: monospace;">
+    `;
+    
+    conversationHistory.forEach(msg => {
+      const speaker = msg.role === 'guard' ? '👤 Guard' : '🤖 WatchTower';
+      const color = msg.role === 'guard' ? '#333' : '#007bff';
+      transcriptHtml += `
+        <div style="margin: 10px 0; padding: 8px; background: white; border-radius: 4px;">
+          <strong style="color: ${color};">${speaker}:</strong><br>
+          <span style="white-space: pre-wrap;">${msg.content}</span>
+        </div>
+      `;
+    });
+    
+    transcriptHtml += '</div>';
+  }
+  
   const htmlContent = `
     <h2>WatchTower Incident Report</h2>
     <p><strong>Status:</strong> ${status}</p>
     <p><strong>Guard Phone:</strong> ${guardPhone}</p>
     <p><strong>Issue:</strong> ${issue}</p>
     <p><strong>Date/Time:</strong> ${new Date().toLocaleString()}</p>
+    ${transcriptHtml}
     <hr>
     <h3>Steps Completed:</h3>
     <ul>
@@ -1782,9 +1806,45 @@ async function escalateToSupervisor(guardPhone, issue, currentStep, additionalCo
   // Log incident for weekly analytics
   logIncident(guardPhone, issue, false, state.completedSteps || [], resolutionTime, true, false);
   
-  await sendEmailReport(guardPhone, issue, false, state.completedSteps || []);
+  // Send email with full conversation transcript
+  await sendEmailReport(guardPhone, issue, false, state.completedSteps || [], state.conversationHistory || []);
   
   console.log(`Escalated issue for ${guardPhone}: ${issue}`);
+}
+
+// Tell guard to CALL supervisor instead of texting
+async function tellGuardToCall(guardPhone, reason) {
+  const message = `📞 For urgent matters like this, please CALL your supervisor directly:\n\n` +
+    `Chris: (925) 222-1067\n` +
+    `Emma: (510) 800-7035\n\n` +
+    `WatchTower is best for equipment issues and reports. For immediate help, calling is faster!`;
+  
+  await sendSMS(guardPhone, message);
+  
+  // Send you a non-urgent notification email
+  if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
+    try {
+      const now = new Date();
+      await emailTransporter.sendMail({
+        from: process.env.EMAIL_USER,
+        to: CONFIG.OWNER_EMAIL,
+        subject: `📞 Guard Requested Help - ${now.toLocaleTimeString()}`,
+        html: `
+          <h2>📞 Guard Requested Supervisor Help</h2>
+          <p><strong>Guard:</strong> ${guardPhone}</p>
+          <p><strong>Time:</strong> ${now.toLocaleString()}</p>
+          <p><strong>Message:</strong> ${reason}</p>
+          <hr>
+          <p><em>Guard was instructed to call supervisor directly.</em></p>
+          <p><em>This is a notification only - no action needed unless guard calls.</em></p>
+        `
+      });
+    } catch (error) {
+      console.error('Error sending notification email:', error);
+    }
+  }
+  
+  console.log(`📞 Told guard ${guardPhone} to call supervisor: ${reason}`);
 }
 
 // Send abandonment alert (guard went silent mid-procedure) - IMMEDIATE EMAIL
@@ -2733,11 +2793,14 @@ async function handleConversation(guardPhone, message) {
   state.conversationHistory = state.conversationHistory || [];
   state.conversationHistory.push({ role: 'guard', content: message });
 
-  // Check for escalation request at any time
-  if (isEscalationRequest(message) && state.active) {
-    await escalateToSupervisor(guardPhone, state.issue, state.currentStep, message);
-    conversationState.delete(guardPhone);
-    abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
+  // Check for escalation request at any time (catches "my relief is late", "need supervisor", etc.)
+  if (isEscalationRequest(message)) {
+    // Don't escalate via SMS - tell them to CALL instead
+    await tellGuardToCall(guardPhone, message);
+    if (state.active) {
+      conversationState.delete(guardPhone);
+      abandonmentAlertsSent.delete(guardPhone);
+    }
     return null;
   }
 
@@ -2862,7 +2925,7 @@ RESPONSE RULES:
          COST_SAVINGS.emergencyServiceCall
        );
        
-       await sendEmailReport(guardPhone, state.issue, true, state.completedSteps);
+       await sendEmailReport(guardPhone, state.issue, true, state.completedSteps, state.conversationHistory || []);
        conversationState.delete(guardPhone);
        abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
        
@@ -2932,7 +2995,7 @@ RESPONSE RULES:
     
     // Check if finished all steps
     if (state.currentStep > state.activeSOP.steps.length) {
-      await sendEmailReport(guardPhone, state.issue, true, state.completedSteps);
+      await sendEmailReport(guardPhone, state.issue, true, state.completedSteps, state.conversationHistory || []);
       conversationState.delete(guardPhone);
       abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
       await sendSMS(guardPhone, "🎉 All steps complete. Great job! Marking as resolved.");
