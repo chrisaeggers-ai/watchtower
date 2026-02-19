@@ -58,8 +58,83 @@ const weeklyAnalytics = {
     firePanelCount: 0,
     fenceCount: 0,
     accessCount: 0
+  },
+  // 💬 QUESTIONS ANSWERED TRACKING
+  questionsAnswered: {
+    handbook: 0,           // General guard questions
+    sopSteps: 0,           // Steps guided during SOPs
+    handoffQuestions: 0,   // Questions during handoffs
+    reportQuestions: 0,    // Questions during report submission
+    total: 0
+  },
+  // 🔧 SOP PERFORMANCE TRACKING
+  sopPerformance: {
+    total: 0,
+    successful: 0,
+    escalated: 0,
+    abandoned: 0,
+    byType: {
+      camera: { total: 0, successful: 0, stepsGuided: 0 },
+      gate: { total: 0, successful: 0, stepsGuided: 0 },
+      firePanel: { total: 0, successful: 0, stepsGuided: 0 },
+      fence: { total: 0, successful: 0, stepsGuided: 0 },
+      access: { total: 0, successful: 0, stepsGuided: 0 },
+      general: { total: 0, successful: 0, stepsGuided: 0 }
+    }
+  },
+  // ⏱️ HANDOFF DURATION TRACKING
+  handoffDurations: [],    // All handoff timing data
+  // ✅ HANDOFF ACCURACY TRACKING
+  handoffAccuracyData: {
+    total: 0,
+    accurate: 0,
+    discrepancies: []      // Detailed discrepancy records
   }
 };
+
+// ⚙️ BETA MODE: Always send reports even if no data
+const BETA_MODE = true;
+
+// Track questions answered
+function trackQuestionAnswered(type) {
+  weeklyAnalytics.questionsAnswered[type]++;
+  weeklyAnalytics.questionsAnswered.total++;
+}
+
+// Track SOP step guided
+function trackSOPStep(sopType) {
+  const typeKey = sopType.toLowerCase().includes('camera') ? 'camera' :
+                  sopType.toLowerCase().includes('gate') ? 'gate' :
+                  sopType.toLowerCase().includes('fire') ? 'firePanel' :
+                  sopType.toLowerCase().includes('fence') ? 'fence' :
+                  sopType.toLowerCase().includes('access') ? 'access' : 'general';
+  
+  weeklyAnalytics.sopPerformance.byType[typeKey].stepsGuided++;
+  weeklyAnalytics.questionsAnswered.sopSteps++;
+  weeklyAnalytics.questionsAnswered.total++;
+}
+
+// Track SOP completion
+function trackSOPCompletion(sopType, successful, escalated = false, abandoned = false) {
+  const typeKey = sopType.toLowerCase().includes('camera') ? 'camera' :
+                  sopType.toLowerCase().includes('gate') ? 'gate' :
+                  sopType.toLowerCase().includes('fire') ? 'firePanel' :
+                  sopType.toLowerCase().includes('fence') ? 'fence' :
+                  sopType.toLowerCase().includes('access') ? 'access' : 'general';
+  
+  weeklyAnalytics.sopPerformance.total++;
+  weeklyAnalytics.sopPerformance.byType[typeKey].total++;
+  
+  if (successful) {
+    weeklyAnalytics.sopPerformance.successful++;
+    weeklyAnalytics.sopPerformance.byType[typeKey].successful++;
+  } else if (escalated) {
+    weeklyAnalytics.sopPerformance.escalated++;
+  } else if (abandoned) {
+    weeklyAnalytics.sopPerformance.abandoned++;
+  }
+}
+
 
 // 📋 SHIFT HANDOFF SYSTEM: Track handoffs and verify accuracy
 const activeHandoffs = new Map(); // Guards currently in handoff process
@@ -1503,9 +1578,9 @@ async function sendWeeklyAnalyticsEmail() {
   const startDate = weeklyAnalytics.startDate;
   const dateRange = `${startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
   
-  // Skip if no incidents this week
-  if (weeklyAnalytics.incidents.length === 0) {
-    console.log('📧 No incidents this week - skipping weekly analytics');
+  // In BETA mode, always send report even if no data
+  if (!BETA_MODE && weeklyAnalytics.incidents.length === 0) {
+    console.log('📧 No incidents this week - skipping weekly analytics (not in beta mode)');
     resetWeeklyAnalytics();
     return;
   }
@@ -1987,6 +2062,236 @@ async function sendWeeklyAnalyticsEmail() {
     `;
   }
   
+  // ═══════════════════════════════════════════════════════════════
+  // 💬 QUESTIONS ANSWERED SECTION
+  // ═══════════════════════════════════════════════════════════════
+  const qa = weeklyAnalytics.questionsAnswered;
+  htmlContent += `
+    <hr>
+    <h2>💬 QUESTIONS ANSWERED</h2>
+    <p><strong>Total Questions Answered:</strong> ${qa.total}</p>
+    <ul>
+      <li>📚 Handbook Questions: ${qa.handbook} (general guard questions)</li>
+      <li>🔧 SOP Guidance: ${qa.sopSteps} (steps guided during procedures)</li>
+      <li>📋 Handoff Questions: ${qa.handoffQuestions} (during handoffs)</li>
+      <li>📝 Report Questions: ${qa.reportQuestions} (during report submission)</li>
+    </ul>
+    <p><strong>Success Rate:</strong> ${qa.total > 0 ? Math.round((qa.total / qa.total) * 100) : 0}% ✅</p>
+    <br>
+  `;
+  
+  // ═══════════════════════════════════════════════════════════════
+  // 🔧 SOP PERFORMANCE SECTION
+  // ═══════════════════════════════════════════════════════════════
+  const sop = weeklyAnalytics.sopPerformance;
+  const sopSuccessRate = sop.total > 0 ? Math.round((sop.successful / sop.total) * 100) : 0;
+  
+  htmlContent += `
+    <hr>
+    <h2>🔧 SOP PERFORMANCE</h2>
+    <p><strong>Total SOPs:</strong> ${sop.total} started, ${sop.successful} successful (${sopSuccessRate}%)</p>
+    <ul>
+      <li>✅ Successful: ${sop.successful}</li>
+      <li>⚠️ Escalated: ${sop.escalated}</li>
+      <li>❌ Abandoned: ${sop.abandoned}</li>
+    </ul>
+    
+    <h3>By Issue Type:</h3>
+    <table style="width:100%; border-collapse: collapse;">
+      <tr style="background: #f0f0f0;">
+        <th style="padding: 8px; text-align: left; border: 1px solid #ddd;">Issue Type</th>
+        <th style="padding: 8px; text-align: center; border: 1px solid #ddd;">Total</th>
+        <th style="padding: 8px; text-align: center; border: 1px solid #ddd;">Successful</th>
+        <th style="padding: 8px; text-align: center; border: 1px solid #ddd;">Success Rate</th>
+        <th style="padding: 8px; text-align: center; border: 1px solid #ddd;">Steps Guided</th>
+      </tr>
+  `;
+  
+  Object.keys(sop.byType).forEach(type => {
+    const data = sop.byType[type];
+    const rate = data.total > 0 ? Math.round((data.successful / data.total) * 100) : 0;
+    const emoji = type === 'camera' ? '📹' : type === 'gate' ? '🚪' : type === 'firePanel' ? '🔥' : type === 'fence' ? '🚧' : '🔧';
+    const typeName = type.charAt(0).toUpperCase() + type.slice(1).replace(/([A-Z])/g, ' $1');
+    
+    if (data.total > 0) {
+      htmlContent += `
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd;">${emoji} ${typeName}</td>
+          <td style="padding: 8px; text-align: center; border: 1px solid #ddd;">${data.total}</td>
+          <td style="padding: 8px; text-align: center; border: 1px solid #ddd;">${data.successful}</td>
+          <td style="padding: 8px; text-align: center; border: 1px solid #ddd;">${rate}%</td>
+          <td style="padding: 8px; text-align: center; border: 1px solid #ddd;">${data.stepsGuided}</td>
+        </tr>
+      `;
+    }
+  });
+  
+  htmlContent += `
+    </table>
+    <p><strong>Total Questions Answered via SOP:</strong> ${qa.sopSteps} steps guided</p>
+    <br>
+  `;
+  
+  // ═══════════════════════════════════════════════════════════════
+  // ⏱️ HANDOFF EFFICIENCY SECTION
+  // ═══════════════════════════════════════════════════════════════
+  const handoffDurations = weeklyAnalytics.handoffDurations;
+  
+  if (handoffDurations.length > 0) {
+    const avgDuration = Math.round(handoffDurations.reduce((sum, h) => sum + h.duration, 0) / handoffDurations.length);
+    const targetDuration = CONFIG.TARGET_HANDOFF_DURATION;
+    const gap = avgDuration - targetDuration;
+    const gapPercent = Math.round((gap / targetDuration) * 100);
+    const laborCostPerMin = CONFIG.LABOR_COST_PER_HOUR / 60;
+    const totalCost = handoffDurations.reduce((sum, h) => sum + h.laborCost, 0);
+    const targetCost = handoffDurations.length * (targetDuration / 60) * CONFIG.LABOR_COST_PER_HOUR;
+    const excessCost = totalCost - targetCost;
+    
+    // By shift
+    const byShift = {day: [], swing: [], night: []};
+    handoffDurations.forEach(h => {
+      if (byShift[h.shiftType.toLowerCase()]) {
+        byShift[h.shiftType.toLowerCase()].push(h.duration);
+      }
+    });
+    
+    const shiftAvgs = {};
+    Object.keys(byShift).forEach(shift => {
+      if (byShift[shift].length > 0) {
+        shiftAvgs[shift] = Math.round(byShift[shift].reduce((a,b) => a+b, 0) / byShift[shift].length);
+      }
+    });
+    
+    // Top/bottom performers
+    const guardDurations = {};
+    handoffDurations.forEach(h => {
+      const last4 = h.guardPhone.slice(-4);
+      if (!guardDurations[last4]) guardDurations[last4] = [];
+      guardDurations[last4].push(h.duration);
+    });
+    
+    const guardAvgs = Object.keys(guardDurations).map(last4 => ({
+      last4,
+      avg: Math.round(guardDurations[last4].reduce((a,b) => a+b, 0) / guardDurations[last4].length),
+      count: guardDurations[last4].length
+    })).sort((a,b) => a.avg - b.avg);
+    
+    htmlContent += `
+      <hr>
+      <h2>⏱️ HANDOFF EFFICIENCY</h2>
+      <p><strong>Handoffs Completed:</strong> ${handoffDurations.length}</p>
+      <p><strong>Average Duration:</strong> ${Math.floor(avgDuration/60)}:${(avgDuration%60).toString().padStart(2,'0')} minutes</p>
+      <p><strong>Target:</strong> ${Math.floor(targetDuration/60)}:${(targetDuration%60).toString().padStart(2,'0')} minutes</p>
+      <p><strong>Gap:</strong> ${gap > 0 ? '+' : ''}${Math.floor(gap/60)}:${Math.abs(gap%60).toString().padStart(2,'0')} (${gapPercent > 0 ? '+' : ''}${gapPercent}%) ${gapPercent > 20 ? '⚠️' : gapPercent > 0 ? '✅' : '🎉'}</p>
+      
+      <h3>💰 Cost Analysis:</h3>
+      <ul>
+        <li>Labor Cost: $${totalCost.toFixed(2)} (${handoffDurations.length} handoffs × ${Math.floor(avgDuration/60)} min × $${laborCostPerMin.toFixed(2)}/min)</li>
+        <li>Target Cost: $${targetCost.toFixed(2)} (${handoffDurations.length} × ${Math.floor(targetDuration/60)} min × $${laborCostPerMin.toFixed(2)}/min)</li>
+        <li>Excess: ${excessCost > 0 ? '$' + excessCost.toFixed(2) : '$0.00 - Under target! 🎉'}</li>
+        <li>Monthly Projection: ${excessCost > 0 ? '$' + (excessCost * 4).toFixed(2) + ' excess' : 'On track ✅'}</li>
+        <li>Annual: ${excessCost > 0 ? '$' + (excessCost * 52).toFixed(2) + ' excess' : 'On track ✅'}</li>
+      </ul>
+      
+      <h3>📊 By Shift:</h3>
+      <ul>
+        ${shiftAvgs.day ? `<li>Day (6am-2pm): ${Math.floor(shiftAvgs.day/60)}:${(shiftAvgs.day%60).toString().padStart(2,'0')} ${shiftAvgs.day > targetDuration ? '⚠️' : '✅'}</li>` : ''}
+        ${shiftAvgs.swing ? `<li>Swing (2pm-10pm): ${Math.floor(shiftAvgs.swing/60)}:${(shiftAvgs.swing%60).toString().padStart(2,'0')} ${shiftAvgs.swing > targetDuration ? '⚠️' : '✅'}</li>` : ''}
+        ${shiftAvgs.night ? `<li>Night (10pm-6am): ${Math.floor(shiftAvgs.night/60)}:${(shiftAvgs.night%60).toString().padStart(2,'0')} ${shiftAvgs.night > targetDuration ? '⚠️' : '✅'}</li>` : ''}
+      </ul>
+      
+      <h3>🏆 Top Performers:</h3>
+      <ul>
+        ${guardAvgs.slice(0,3).map((g, i) => 
+          `<li>${i===0?'🥇':i===1?'🥈':'🥉'} Guard ...${g.last4}: ${Math.floor(g.avg/60)}:${(g.avg%60).toString().padStart(2,'0')} avg (${g.count} handoffs)</li>`
+        ).join('')}
+      </ul>
+      
+      ${guardAvgs.some(g => g.avg > targetDuration * 1.5) ? `
+      <h3>⚠️ Needs Improvement:</h3>
+      <ul>
+        ${guardAvgs.filter(g => g.avg > targetDuration * 1.5).map(g => 
+          `<li>Guard ...${g.last4}: ${Math.floor(g.avg/60)}:${(g.avg%60).toString().padStart(2,'0')} avg (${Math.round((g.avg/targetDuration - 1) * 100)}% over target) 🚨</li>`
+        ).join('')}
+      </ul>
+      <p><strong>Action:</strong> Coaching recommended for guards significantly over target.</p>
+      ` : ''}
+      <br>
+    `;
+  }
+  
+  // ═══════════════════════════════════════════════════════════════
+  // ✅ HANDOFF ACCURACY SECTION
+  // ═══════════════════════════════════════════════════════════════
+  const accuracy = weeklyAnalytics.handoffAccuracyData;
+  const discrepancies = accuracy.discrepancies || [];
+  const accuracyRate = accuracy.total > 0 ? Math.round((accuracy.accurate / accuracy.total) * 100) : 100;
+  
+  if (accuracy.total > 0 || discrepancies.length > 0) {
+    htmlContent += `
+      <hr>
+      <h2>✅ HANDOFF ACCURACY</h2>
+      <p><strong>Overall Accuracy:</strong> ${accuracyRate}% (${accuracy.accurate}/${accuracy.total} accurate)</p>
+      
+      ${discrepancies.length > 0 ? `
+        <h3>⚠️ Discrepancies Detected: ${discrepancies.length}</h3>
+        <ul>
+          ${discrepancies.map(d => `
+            <li>
+              <strong>${d.date}</strong> - ${d.type}<br>
+              Outgoing: "${d.reported}"<br>
+              Incoming: "${d.actual}"<br>
+              Impact: ${d.impact}
+            </li>
+          `).join('')}
+        </ul>
+      ` : '<p>✅ No discrepancies detected - all handoff information was accurate!</p>'}
+      <br>
+    `;
+  }
+  
+  // ═══════════════════════════════════════════════════════════════
+  // 🎯 KEY INSIGHTS & RECOMMENDATIONS
+  // ═══════════════════════════════════════════════════════════════
+  htmlContent += `
+    <hr>
+    <h2>💡 KEY INSIGHTS & RECOMMENDATIONS</h2>
+    <ul>
+  `;
+  
+  // Add insights based on data
+  if (handoffDurations.length > 0 && gap > 60) {
+    const slowestShift = Object.keys(shiftAvgs).reduce((a,b) => shiftAvgs[a] > shiftAvgs[b] ? a : b);
+    htmlContent += `
+      <li><strong>Handoff Efficiency:</strong> Average ${Math.floor(gap/60)} min over target. 
+      ${slowestShift.charAt(0).toUpperCase() + slowestShift.slice(1)} shift slowest. 
+      Focus training here for $${(excessCost * 52).toFixed(0)} annual savings.</li>
+    `;
+  }
+  
+  if (sopSuccessRate >= 80) {
+    htmlContent += `<li><strong>SOP Success:</strong> ${sopSuccessRate}% success rate - Guards are effectively fixing issues! Value: ~$${(sop.successful * 250).toFixed(0)} saved (vs emergency calls).</li>`;
+  }
+  
+  if (qa.total > 50) {
+    htmlContent += `<li><strong>High Engagement:</strong> ${qa.total} questions answered this week. WatchTower is actively helping guards!</li>`;
+  }
+  
+  htmlContent += `
+    </ul>
+    <br>
+  `;
+  
+  // Beta mode indicator
+  if (BETA_MODE) {
+    htmlContent += `
+      <p style="background: #fff3cd; padding: 10px; border-left: 4px solid #ffc107;">
+        <strong>⚙️ BETA MODE:</strong> You're receiving this report even with no/low activity for testing purposes.
+        This helps verify the system is working correctly.
+      </p>
+    `;
+  }
+  
   htmlContent += `
     <hr>
     <p><em>Next report: Next Monday at 9:00 AM Pacific</em></p>
@@ -2170,6 +2475,12 @@ const CONFIG = {
   SERVER_URL: process.env.SERVER_URL || 'http://localhost:3000',
   MAX_RETRIES: 2,
   
+  // ⏱️ HANDOFF DURATION CONFIGURATION
+  TARGET_HANDOFF_DURATION: 300, // 5 minutes in seconds
+  LABOR_COST_PER_HOUR: 20,      // $20/hour
+  SLOW_HANDOFF_THRESHOLD: 600,  // 10 minutes - alert threshold
+  STUCK_QUESTION_THRESHOLD: 120, // 2 minutes - stuck on question alert
+  
   // 🚫 EXCLUDED FROM PROACTIVE CHECKS: Owners/supervisors who text in to test
   // These numbers will NOT receive random site check texts
   EXCLUDED_FROM_CHECKS: [
@@ -2323,6 +2634,9 @@ async function escalateToSupervisor(guardPhone, issue, currentStep, additionalCo
   
   // Log incident for weekly analytics
   logIncident(guardPhone, issue, false, state.completedSteps || [], resolutionTime, true, false);
+  
+  // 🔧 TRACK SOP ESCALATION
+  trackSOPCompletion(issue, false, true, false);
   
   // Send email with full conversation transcript
   await sendEmailReport(guardPhone, issue, false, state.completedSteps || [], state.conversationHistory || []);
@@ -3023,10 +3337,14 @@ async function startHandoffProcess(guardPhone) {
   const handoffState = {
     step: 0,
     data: {},
-    startTime: Date.now()
+    startTime: Date.now(),
+    questionTimes: {} // Track time spent on each question
   };
   
   activeHandoffs.set(guardPhone, handoffState);
+  
+  // Track that handoff question was asked
+  trackQuestionAnswered('handoffQuestions');
   
   await sendSMS(guardPhone, 
     "📋 Before you go - let's do a quick handoff checklist. " +
@@ -3092,8 +3410,17 @@ async function handleHandoffResponse(guardPhone, message, handoffState) {
   const currentQuestion = HANDOFF_QUESTIONS[handoffState.step - 1];
   
   if (currentQuestion.validation(message)) {
+    // Calculate time spent on this question
+    const questionKey = `question${handoffState.step}`;
+    const questionStartTime = handoffState.questionStartTime || handoffState.startTime;
+    const timeSpent = Math.round((Date.now() - questionStartTime) / 1000); // seconds
+    handoffState.questionTimes[questionKey] = timeSpent;
+    
     // Store the answer
     handoffState.data[currentQuestion.field] = message.toLowerCase().trim();
+    
+    // Track handoff question answered
+    trackQuestionAnswered('handoffQuestions');
     
     // 💰 ROI: Log phone issues caught at handoff
     if (currentQuestion.field === 'phoneVolume' && message.toLowerCase().includes('no')) {
@@ -3206,12 +3533,13 @@ async function handleHandoffResponse(guardPhone, message, handoffState) {
     
     if (handoffState.step <= HANDOFF_QUESTIONS.length) {
       // Ask next question
+      handoffState.questionStartTime = Date.now(); // Mark when this question started
       activeHandoffs.set(guardPhone, handoffState);
       await sendSMS(guardPhone, HANDOFF_QUESTIONS[handoffState.step - 1].question);
       return null;
     } else {
       // Handoff complete!
-      await completeHandoff(guardPhone, handoffState.data);
+      await completeHandoff(guardPhone, handoffState.data, handoffState);
       return null;
     }
   } else {
@@ -3222,8 +3550,44 @@ async function handleHandoffResponse(guardPhone, message, handoffState) {
 }
 
 // Complete the handoff process
-async function completeHandoff(guardPhone, handoffData) {
+async function completeHandoff(guardPhone, handoffData, handoffState) {
   activeHandoffs.delete(guardPhone);
+  
+  // ⏱️ CALCULATE HANDOFF DURATION
+  const endTime = Date.now();
+  const startTime = handoffState.startTime;
+  const duration = Math.round((endTime - startTime) / 1000); // seconds
+  const laborCost = (duration / 3600) * CONFIG.LABOR_COST_PER_HOUR; // dollars
+  
+  // Determine shift type based on time
+  const hour = new Date().getHours();
+  let shiftType = 'Day';
+  if (hour >= 22 || hour < 6) shiftType = 'Midnight';
+  else if (hour >= 14 && hour < 22) shiftType = 'Swing';
+  else if (hour >= 6 && hour < 14) shiftType = 'Day';
+  
+  // Store duration data for weekly analytics
+  const durationData = {
+    guardPhone,
+    shiftType,
+    timestamp: new Date(),
+    startTime,
+    endTime,
+    duration, // seconds
+    questionTimes: handoffState.questionTimes || {},
+    laborCost,
+    targetDuration: CONFIG.TARGET_HANDOFF_DURATION,
+    overTarget: duration > CONFIG.TARGET_HANDOFF_DURATION,
+    percentOverTarget: Math.round(((duration - CONFIG.TARGET_HANDOFF_DURATION) / CONFIG.TARGET_HANDOFF_DURATION) * 100)
+  };
+  
+  weeklyAnalytics.handoffDurations.push(durationData);
+  
+  // Check if handoff was slow (alert threshold)
+  if (duration > CONFIG.SLOW_HANDOFF_THRESHOLD) {
+    console.log(`⚠️ SLOW HANDOFF: Guard ...${guardPhone.slice(-4)} took ${Math.round(duration/60)} minutes`);
+    // Could send alert email here if desired
+  }
   
   // Calculate shift stats
   const shiftStats = {
@@ -3232,18 +3596,11 @@ async function completeHandoff(guardPhone, handoffData) {
     avgResolution: null,
     proactiveChecks: weeklyAnalytics.checkIns.filter(c => c.guardPhone === guardPhone &&
       c.timestamp > new Date(Date.now() - 12 * 60 * 60 * 1000)).length,
-    duration: null
+    duration: Math.round(duration / 60) // minutes for stats
   };
   
   // Log handoff
   logHandoff(guardPhone, handoffData);
-  
-  // Determine shift type based on time
-  const hour = new Date().getHours();
-  let shiftType = 'Day';
-  if (hour >= 22 || hour < 6) shiftType = 'Midnight';
-  else if (hour >= 14 && hour < 22) shiftType = 'Swing';
-  else if (hour >= 6 && hour < 14) shiftType = 'Day';
   
   // Store in daily buffer for 6am consolidated report
   dailyHandoffBuffer.handoffs.push({
@@ -3253,7 +3610,8 @@ async function completeHandoff(guardPhone, handoffData) {
     completed: true,
     data: handoffData,
     stats: shiftStats,
-    issues: detectHandoffIssues(handoffData)
+    issues: detectHandoffIssues(handoffData),
+    duration // Add duration to daily report
   });
   
   // 🚨 TRACK LAZY BEHAVIOR: Handoff complete
@@ -3265,7 +3623,7 @@ async function completeHandoff(guardPhone, handoffData) {
     "Incoming guard will be briefed. Stay safe!"
   );
   
-  console.log(`📋 Handoff completed for guard ...${guardPhone.slice(-4)} (${shiftType} shift)`);
+  console.log(`📋 Handoff completed for guard ...${guardPhone.slice(-4)} (${shiftType} shift) - Duration: ${Math.round(duration/60)} min`);
 }
 
 // Detect issues from handoff data
@@ -3531,6 +3889,9 @@ async function handleConversation(guardPhone, message) {
           const firstStep = detected.sop.steps[0];
           const imageUrl = firstStep.image ? `${CONFIG.SERVER_URL}/images/${firstStep.image}` : null;
           
+          // 🔧 TRACK FIRST SOP STEP GUIDED
+          trackSOPStep(detected.issue);
+          
           state.conversationHistory.push({ role: 'watchtower', content: firstStep.userFriendly });
           await sendSMS(guardPhone, firstStep.userFriendly, imageUrl);
           return null;
@@ -3571,6 +3932,8 @@ RESPONSE RULES:
           });
           
           console.log(`✅ Handbook AI answered question`);
+          // 💬 TRACK HANDBOOK QUESTION ANSWERED
+          trackQuestionAnswered('handbook');
           return response.content[0].text;
         } catch (error) {
           console.error('Claude API error:', error);
@@ -3753,6 +4116,9 @@ RESPONSE RULES:
          COST_SAVINGS.emergencyServiceCall
        );
        
+       // 🔧 TRACK SOP SUCCESS
+       trackSOPCompletion(state.issue, true, false, false);
+       
        await sendEmailReport(guardPhone, state.issue, true, state.completedSteps, state.conversationHistory || []);
        conversationState.delete(guardPhone);
        abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
@@ -3833,6 +4199,9 @@ RESPONSE RULES:
     // Send next step
     const nextStep = state.activeSOP.steps[state.currentStep - 1];
     const imageUrl = nextStep.image ? `${CONFIG.SERVER_URL}/images/${nextStep.image}` : null;
+    
+    // 🔧 TRACK SOP STEP GUIDED
+    trackSOPStep(state.issue);
     
     state.conversationHistory.push({ role: 'watchtower', content: nextStep.userFriendly });
     conversationState.set(guardPhone, state);
