@@ -159,6 +159,288 @@ function resetDailyHandoffBuffer() {
   dailyHandoffBuffer.handoffs = [];
 }
 
+// 🚨 LAZY DETECTOR: Track guard behavior patterns
+const lazyBehavior = new Map(); // Per-guard lazy indicators
+
+function initLazyTracking(guardPhone) {
+  if (!lazyBehavior.has(guardPhone)) {
+    lazyBehavior.set(guardPhone, {
+      handoffSkips: 0,
+      totalHandoffs: 0,
+      rushes: 0, // SOP steps completed too fast
+      totalSteps: 0,
+      oneWordResponses: 0,
+      totalResponses: 0,
+      reportSkips: 0,
+      totalReports: 0,
+      lastWarning: null
+    });
+  }
+  return lazyBehavior.get(guardPhone);
+}
+
+// Track lazy behavior indicators
+function trackLazyBehavior(guardPhone, type, metadata = {}) {
+  const behavior = initLazyTracking(guardPhone);
+  
+  switch(type) {
+    case 'handoff_skip':
+      behavior.handoffSkips++;
+      behavior.totalHandoffs++;
+      break;
+      
+    case 'handoff_complete':
+      behavior.totalHandoffs++;
+      break;
+      
+    case 'sop_rush':
+      // SOP step completed in <30 seconds (suspiciously fast)
+      behavior.rushes++;
+      behavior.totalSteps++;
+      console.log(`⚠️ Guard ...${guardPhone.slice(-4)} rushed through step (${metadata.seconds}s)`);
+      break;
+      
+    case 'sop_step':
+      behavior.totalSteps++;
+      break;
+      
+    case 'one_word':
+      behavior.oneWordResponses++;
+      behavior.totalResponses++;
+      break;
+      
+    case 'response':
+      behavior.totalResponses++;
+      break;
+      
+    case 'report_skip':
+      behavior.reportSkips++;
+      behavior.totalReports++;
+      break;
+      
+    case 'report_complete':
+      behavior.totalReports++;
+      break;
+  }
+  
+  // Check if guard is showing lazy patterns
+  checkLazyPatterns(guardPhone);
+}
+
+// Check if guard shows concerning lazy patterns
+function checkLazyPatterns(guardPhone) {
+  const behavior = lazyBehavior.get(guardPhone);
+  if (!behavior) return;
+  
+  const guardLast4 = guardPhone.slice(-4);
+  const issues = [];
+  
+  // Check handoff skip rate (>30% is concerning)
+  if (behavior.totalHandoffs >= 5) {
+    const skipRate = (behavior.handoffSkips / behavior.totalHandoffs) * 100;
+    if (skipRate > 30) {
+      issues.push(`Skips handoffs ${skipRate.toFixed(0)}% of time (${behavior.handoffSkips}/${behavior.totalHandoffs})`);
+    }
+  }
+  
+  // Check rush rate (>40% is concerning)
+  if (behavior.totalSteps >= 10) {
+    const rushRate = (behavior.rushes / behavior.totalSteps) * 100;
+    if (rushRate > 40) {
+      issues.push(`Rushes through procedures ${rushRate.toFixed(0)}% of time (${behavior.rushes}/${behavior.totalSteps} steps)`);
+    }
+  }
+  
+  // Check one-word response rate (>60% is concerning)
+  if (behavior.totalResponses >= 10) {
+    const oneWordRate = (behavior.oneWordResponses / behavior.totalResponses) * 100;
+    if (oneWordRate > 60) {
+      issues.push(`Minimal effort responses ${oneWordRate.toFixed(0)}% of time (${behavior.oneWordResponses}/${behavior.totalResponses})`);
+    }
+  }
+  
+  // If concerning patterns detected and no recent warning, send alert
+  if (issues.length >= 2) {
+    const now = Date.now();
+    const lastWarning = behavior.lastWarning || 0;
+    const hoursSinceWarning = (now - lastWarning) / (1000 * 60 * 60);
+    
+    // Only alert once per 24 hours
+    if (hoursSinceWarning > 24) {
+      sendLazyBehaviorAlert(guardPhone, issues);
+      behavior.lastWarning = now;
+    }
+  }
+}
+
+// Send alert about lazy behavior patterns
+async function sendLazyBehaviorAlert(guardPhone, issues) {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) return;
+  
+  const guardLast4 = guardPhone.slice(-4);
+  
+  try {
+    await emailTransporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: CONFIG.OWNER_EMAIL,
+      subject: `⚠️ Lazy Behavior Pattern - Guard ...${guardLast4}`,
+      html: `
+        <h2>⚠️ Lazy Behavior Pattern Detected</h2>
+        <p><strong>Guard:</strong> ...${guardLast4}</p>
+        <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
+        <hr>
+        <h3>Concerning Patterns:</h3>
+        <ul>
+          ${issues.map(issue => `<li>${issue}</li>`).join('')}
+        </ul>
+        <hr>
+        <p><strong>Recommendation:</strong> Coaching or increased supervision needed.</p>
+      `
+    });
+    console.log(`📧 Lazy behavior alert sent for guard ...${guardLast4}`);
+  } catch (error) {
+    console.error('Error sending lazy behavior alert:', error);
+  }
+}
+
+// 👁️ SPOT CHECK SYSTEM: Random verification checks
+const spotChecks = new Map(); // Active spot checks per guard
+const spotCheckHistory = []; // History of all spot checks
+
+// Generate random spot check
+function scheduleRandomSpotChecks() {
+  setInterval(() => {
+    // Random chance (10%) to trigger spot check during active hours
+    if (Math.random() < 0.10) {
+      // Get active guards (those who've texted recently)
+      const now = Date.now();
+      const activeGuards = Array.from(guardLastContact.entries())
+        .filter(([phone, lastContact]) => {
+          const hoursSince = (now - lastContact) / (1000 * 60 * 60);
+          return hoursSince < 12; // Active in last 12 hours
+        })
+        .map(([phone]) => phone);
+      
+      // Pick random guard
+      if (activeGuards.length > 0) {
+        const randomGuard = activeGuards[Math.floor(Math.random() * activeGuards.length)];
+        sendSpotCheck(randomGuard);
+      }
+    }
+  }, 30 * 60 * 1000); // Check every 30 minutes
+}
+
+// Send spot check to guard
+async function sendSpotCheck(guardPhone) {
+  const spotCheckTypes = [
+    { text: "📸 Spot check: Send me a photo of the north parking lot right now.", type: "photo" },
+    { text: "📸 Spot check: Send me a photo of the main entrance right now.", type: "photo" },
+    { text: "📸 Spot check: Send me a photo of the south gate right now.", type: "photo" },
+    { text: "✅ Spot check: Reply with your current location (e.g., 'guard shack', 'patrolling').", type: "text" },
+    { text: "✅ Spot check: How many vehicles in the parking lot right now?", type: "text" }
+  ];
+  
+  const randomCheck = spotCheckTypes[Math.floor(Math.random() * spotCheckTypes.length)];
+  
+  const spotCheck = {
+    guardPhone,
+    timestamp: new Date(),
+    checkType: randomCheck.type,
+    text: randomCheck.text,
+    responded: false,
+    responseTime: null,
+    passed: null
+  };
+  
+  spotChecks.set(guardPhone, spotCheck);
+  spotCheckHistory.push(spotCheck);
+  
+  await sendSMS(guardPhone, randomCheck.text);
+  console.log(`👁️ Spot check sent to guard ...${guardPhone.slice(-4)}: ${randomCheck.type}`);
+  
+  // Set 5-minute timeout
+  setTimeout(() => {
+    checkSpotCheckTimeout(guardPhone, spotCheck);
+  }, 5 * 60 * 1000);
+}
+
+// Check if guard failed to respond to spot check
+async function checkSpotCheckTimeout(guardPhone, spotCheck) {
+  const activeCheck = spotChecks.get(guardPhone);
+  
+  // If still the same check and not responded
+  if (activeCheck && activeCheck.timestamp === spotCheck.timestamp && !activeCheck.responded) {
+    console.log(`⚠️ Guard ...${guardPhone.slice(-4)} failed spot check (no response in 5 min)`);
+    
+    // Send warning
+    await sendSMS(guardPhone, "⚠️ No response to spot check. Are you awake? Please respond immediately.");
+    
+    // Mark as failed
+    spotCheck.passed = false;
+    spotCheck.responseTime = 300; // 5 min timeout
+    
+    // Set another 5-minute timeout for escalation
+    setTimeout(() => {
+      escalateSpotCheckFailure(guardPhone, spotCheck);
+    }, 5 * 60 * 1000);
+  }
+}
+
+// Escalate if still no response after warning
+async function escalateSpotCheckFailure(guardPhone, spotCheck) {
+  const activeCheck = spotChecks.get(guardPhone);
+  
+  // If still hasn't responded after warning
+  if (activeCheck && activeCheck.timestamp === spotCheck.timestamp && !activeCheck.responded) {
+    console.log(`🚨 Guard ...${guardPhone.slice(-4)} STILL not responding to spot check - ESCALATING`);
+    
+    // Send alert to owner
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASSWORD) {
+      try {
+        await emailTransporter.sendMail({
+          from: process.env.EMAIL_USER,
+          to: CONFIG.OWNER_EMAIL,
+          subject: `🚨 URGENT: Guard Not Responding to Spot Checks`,
+          html: `
+            <h2>🚨 URGENT: Guard Not Responding</h2>
+            <p><strong>Guard:</strong> ${guardPhone}</p>
+            <p><strong>Spot Check Sent:</strong> ${spotCheck.timestamp.toLocaleString()}</p>
+            <p><strong>Check Type:</strong> ${spotCheck.checkType}</p>
+            <p><strong>Status:</strong> No response after 10 minutes + warning</p>
+            <hr>
+            <p><strong>Action Required:</strong> Call guard immediately to verify they're okay.</p>
+          `
+        });
+      } catch (error) {
+        console.error('Error sending spot check escalation:', error);
+      }
+    }
+    
+    // Remove from active checks
+    spotChecks.delete(guardPhone);
+  }
+}
+
+// Handle spot check response
+function handleSpotCheckResponse(guardPhone, message) {
+  const spotCheck = spotChecks.get(guardPhone);
+  if (!spotCheck) return false; // No active spot check
+  
+  // Mark as responded
+  const responseTime = Math.round((Date.now() - spotCheck.timestamp.getTime()) / 1000);
+  spotCheck.responded = true;
+  spotCheck.responseTime = responseTime;
+  spotCheck.passed = true;
+  
+  console.log(`✅ Guard ...${guardPhone.slice(-4)} responded to spot check in ${responseTime}s`);
+  
+  // Remove from active checks
+  spotChecks.delete(guardPhone);
+  
+  return true; // Was a spot check response
+}
+
+
 
 // ⚡ RESPONSE SPEED ANALYTICS: Track guard alertness and engagement
 const responseSpeedTracking = {
@@ -1824,6 +2106,10 @@ scheduleDailyDigest();
 // Start the weekly analytics scheduler
 scheduleWeeklyAnalytics();
 
+// Start the random spot check scheduler
+scheduleRandomSpotChecks();
+console.log('👁️ Random spot check scheduler started');
+
 // Check for abandoned conversations every 2 minutes
 setInterval(() => {
   const now = Date.now();
@@ -2781,6 +3067,9 @@ async function handleHandoffResponse(guardPhone, message, handoffState) {
       issues: ['Handoff skipped by guard']
     });
     
+    // 🚨 TRACK LAZY BEHAVIOR: Handoff skip
+    trackLazyBehavior(guardPhone, 'handoff_skip');
+    
     await sendSMS(guardPhone, "Handoff skipped. Have a good one - but please do handoffs in the future for accountability!");
     console.log(`⚠️ Handoff skipped by guard ...${guardPhone.slice(-4)} (${shiftType} shift)`);
     return null;
@@ -2967,6 +3256,9 @@ async function completeHandoff(guardPhone, handoffData) {
     issues: detectHandoffIssues(handoffData)
   });
   
+  // 🚨 TRACK LAZY BEHAVIOR: Handoff complete
+  trackLazyBehavior(guardPhone, 'handoff_complete');
+  
   // Send confirmation to outgoing guard
   await sendSMS(guardPhone, 
     "✅ Handoff complete! Great shift. " +
@@ -3145,6 +3437,13 @@ async function handleConversation(guardPhone, message) {
     return null; // Already handled via SMS, don't send Twilio response
   }
   
+  // 👁️ CHECK IF RESPONDING TO SPOT CHECK
+  const isSpotCheckResponse = handleSpotCheckResponse(guardPhone, message);
+  if (isSpotCheckResponse) {
+    await sendSMS(guardPhone, "✅ Confirmed. Thanks!");
+    return null; // Handled
+  }
+  
   // 📋 CHECK IF IN HANDOFF PROCESS
   const handoffState = activeHandoffs.get(guardPhone);
   if (handoffState) {
@@ -3169,6 +3468,17 @@ async function handleConversation(guardPhone, message) {
     startTime: null,
     conversationHistory: []
   };
+
+  // 🚨 TRACK LAZY BEHAVIOR: Response word count
+  const wordCount = message.trim().split(/\s+/).length;
+  if (state.active && state.activeSOP) {
+    // Only track during active SOPs
+    if (wordCount === 1) {
+      trackLazyBehavior(guardPhone, 'one_word');
+    } else {
+      trackLazyBehavior(guardPhone, 'response');
+    }
+  }
 
   // Add to conversation history
   state.conversationHistory = state.conversationHistory || [];
@@ -3381,6 +3691,13 @@ RESPONSE RULES:
         currentStep: state.currentStep,
         totalSteps: state.activeSOP.steps.length
       });
+      
+      // 🚨 LAZY DETECTION: Check if rushed through step (< 30 seconds)
+      if (responseTimeSeconds < 30) {
+        trackLazyBehavior(guardPhone, 'sop_rush', { seconds: responseTimeSeconds });
+      } else {
+        trackLazyBehavior(guardPhone, 'sop_step');
+      }
     }
     
     // Update last activity timestamp (for abandonment detection)
