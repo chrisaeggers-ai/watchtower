@@ -158,7 +158,7 @@ const incidentCards = {
   sent: [],
   testMode: true, // Send to test email first
   testEmail: 'erecob@manzanitasecurity.io',
-  ownerBCC: 'chris.aeggers@gmail.com'
+  ownerBCC: 'chris.a.eggers@gmail.com'
 };
 
 // Value calculation constants
