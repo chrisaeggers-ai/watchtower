@@ -153,6 +153,400 @@ const roiTracking = {
   }
 };
 
+// 📧 INCIDENT CARD SYSTEM: Make invisible work visible to clients
+const incidentCards = {
+  sent: [],
+  testMode: true, // Send to test email first
+  testEmail: 'erecob@manzanitasecurity.io',
+  ownerBCC: 'chris.aeggers@gmail.com'
+};
+
+// Value calculation constants
+const VALUE_CALCULATIONS = {
+  emergencyCall: {
+    businessHours: 150,
+    afterHours: 250,
+    weekend: 350
+  },
+  clientTime: {
+    perHour: 150,
+    avgIncidentHours: 1.5
+  },
+  equipmentDowntime: {
+    camera: 500,
+    gate: 1000,
+    hvac: 2000
+  },
+  preventedDamage: {
+    water: 5000,
+    theft: 2500,
+    fire: 10000
+  }
+};
+
+// Determine if incident warrants a card
+function shouldSendIncidentCard(incidentData) {
+  const { issueType, resolutionTime, timestamp, successful } = incidentData;
+  
+  // Only send for successful resolutions
+  if (!successful) return false;
+  
+  // Check timing
+  const hour = timestamp.getHours();
+  const isAfterHours = hour < 9 || hour > 17;
+  const isWeekend = [0, 6].includes(timestamp.getDay());
+  
+  // Always send for:
+  // - After hours (5pm-9am)
+  // - Weekends
+  // - Equipment issues
+  // - Security/safety issues
+  
+  if (isAfterHours || isWeekend) return true;
+  
+  // Send for equipment issues
+  if (issueType.toLowerCase().includes('camera')) return true;
+  if (issueType.toLowerCase().includes('gate')) return true;
+  if (issueType.toLowerCase().includes('door')) return true;
+  if (issueType.toLowerCase().includes('lock')) return true;
+  if (issueType.toLowerCase().includes('alarm')) return true;
+  if (issueType.toLowerCase().includes('fire')) return true;
+  
+  // Don't send for minor routine things
+  return false;
+}
+
+// Calculate value saved for incident
+function calculateIncidentValue(incidentData) {
+  const { issueType, timestamp } = incidentData;
+  
+  const hour = timestamp.getHours();
+  const isAfterHours = hour < 9 || hour > 17;
+  const isWeekend = [0, 6].includes(timestamp.getDay());
+  
+  let emergencyCallCost = 0;
+  let clientTimeCost = 0;
+  let total = 0;
+  
+  // Emergency call cost
+  if (isWeekend) {
+    emergencyCallCost = VALUE_CALCULATIONS.emergencyCall.weekend;
+  } else if (isAfterHours) {
+    emergencyCallCost = VALUE_CALCULATIONS.emergencyCall.afterHours;
+  } else {
+    emergencyCallCost = VALUE_CALCULATIONS.emergencyCall.businessHours;
+  }
+  
+  // Client time saved (didn't have to deal with it)
+  clientTimeCost = VALUE_CALCULATIONS.clientTime.perHour * VALUE_CALCULATIONS.clientTime.avgIncidentHours;
+  
+  total = emergencyCallCost + clientTimeCost;
+  
+  return {
+    emergencyCallCost,
+    clientTimeCost,
+    total
+  };
+}
+
+// Generate incident card HTML
+function generateIncidentCardHTML(incidentData) {
+  const { issueType, guardPhone, resolutionTime, timestamp, steps } = incidentData;
+  
+  const hour = timestamp.getHours();
+  const isAfterHours = hour < 9 || hour > 17;
+  const isWeekend = [0, 6].includes(timestamp.getDay());
+  
+  // Calculate value
+  const value = calculateIncidentValue(incidentData);
+  
+  // Format time
+  const timeStr = timestamp.toLocaleString('en-US', { 
+    weekday: 'long',
+    month: 'short', 
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true 
+  });
+  
+  // Resolution time in minutes
+  const resolutionMinutes = Math.round(resolutionTime / 60);
+  
+  // Guard last 4
+  const guardLast4 = guardPhone.slice(-4);
+  
+  // Determine card type and emoji
+  let cardTitle = '🚨 ISSUE RESOLVED - NO ACTION NEEDED FROM YOU';
+  let contextLine = '';
+  
+  if (isAfterHours && !isWeekend) {
+    cardTitle = '🌙 HANDLED WHILE YOU SLEPT';
+    contextLine = 'Problem resolved overnight - you woke up to everything working.';
+  } else if (isWeekend) {
+    cardTitle = '🦸 WEEKEND EMERGENCY HANDLED';
+    contextLine = 'Your weekend was uninterrupted - we handled everything.';
+  } else {
+    cardTitle = '🔍 PROBLEM CAUGHT AND FIXED';
+    contextLine = 'Issue detected and resolved before it became your problem.';
+  }
+  
+  // Extract issue location/description
+  let issueDescription = issueType;
+  let issueName = issueType;
+  
+  // Simple parsing
+  if (issueType.includes('Camera')) {
+    issueName = 'Camera System';
+    issueDescription = 'Camera offline or malfunctioning';
+  } else if (issueType.includes('Gate')) {
+    issueName = 'Gate System';
+    issueDescription = 'Gate stuck or malfunctioning';
+  } else if (issueType.includes('NVR')) {
+    issueName = 'Camera System';
+    issueDescription = 'NVR system issue';
+  } else if (issueType.includes('Fire')) {
+    issueName = 'Fire Panel';
+    issueDescription = 'Fire panel alert';
+  }
+  
+  // Build HTML
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    .card {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 24px;
+      text-align: center;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 600;
+    }
+    .content {
+      padding: 24px;
+    }
+    .issue-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin: 0 0 8px 0;
+    }
+    .timestamp {
+      color: #666;
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+    .section {
+      margin-bottom: 20px;
+    }
+    .section-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+    }
+    .section-content {
+      color: #444;
+      padding-left: 24px;
+    }
+    .value-box {
+      background: #f0f9ff;
+      border-left: 4px solid #3b82f6;
+      padding: 16px;
+      margin: 20px 0;
+      border-radius: 4px;
+    }
+    .value-box h3 {
+      margin: 0 0 12px 0;
+      color: #1e40af;
+      font-size: 16px;
+    }
+    .value-box ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+    .value-box li {
+      margin: 6px 0;
+      color: #1e40af;
+    }
+    .context {
+      background: #fef3c7;
+      border-left: 4px solid #f59e0b;
+      padding: 16px;
+      margin: 20px 0;
+      border-radius: 4px;
+      font-weight: 500;
+      color: #92400e;
+    }
+    .footer {
+      background: #f9fafb;
+      padding: 20px;
+      text-align: center;
+      border-top: 1px solid #e5e7eb;
+    }
+    .footer p {
+      margin: 4px 0;
+      color: #666;
+    }
+    .cta {
+      color: #667eea;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    @media only screen and (max-width: 600px) {
+      body {
+        padding: 10px;
+      }
+      .header h1 {
+        font-size: 20px;
+      }
+      .content {
+        padding: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <h1>${cardTitle}</h1>
+    </div>
+    
+    <div class="content">
+      <div class="issue-title">${issueName}</div>
+      <div class="timestamp">${timeStr}</div>
+      
+      <div class="section">
+        <div class="section-title">✅ What Happened</div>
+        <div class="section-content">${issueDescription}</div>
+      </div>
+      
+      <div class="section">
+        <div class="section-title">✅ What We Did</div>
+        <div class="section-content">Guard immediately addressed the issue following our troubleshooting protocol</div>
+      </div>
+      
+      <div class="section">
+        <div class="section-title">✅ Time to Fix</div>
+        <div class="section-content">${resolutionMinutes} minutes - Issue fully resolved</div>
+      </div>
+      
+      <div class="value-box">
+        <h3>💰 What You Saved</h3>
+        <ul>
+          <li>Emergency service call avoided: $${value.emergencyCallCost}</li>
+          <li>Your time saved: $${value.clientTimeCost} (${VALUE_CALCULATIONS.clientTime.avgIncidentHours} hours)</li>
+          <li>Your involvement: 0 minutes</li>
+        </ul>
+        <strong style="color: #1e40af;">Total value: $${value.total}</strong>
+      </div>
+      
+      <div class="context">
+        ${contextLine}
+      </div>
+    </div>
+    
+    <div class="footer">
+      <p><strong>This is why you have us working 24/7.</strong></p>
+      <p>Questions? Call <a href="tel:+19259221067" class="cta">(925) 922-1067</a> anytime.</p>
+      <p style="font-size: 12px; color: #999; margin-top: 16px;">
+        Manzanita Security • Guard: ...${guardLast4}
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+  `;
+  
+  return html;
+}
+
+// Send incident card via email
+async function sendIncidentCard(incidentData) {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+    console.log('📧 Email not configured - skipping incident card');
+    return;
+  }
+  
+  // Check if should send
+  if (!shouldSendIncidentCard(incidentData)) {
+    console.log('📧 Incident not significant enough for card');
+    return;
+  }
+  
+  const { issueType, timestamp } = incidentData;
+  
+  // Generate card HTML
+  const cardHTML = generateIncidentCardHTML(incidentData);
+  
+  // Determine subject
+  const timeStr = timestamp.toLocaleString('en-US', { 
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true 
+  });
+  
+  let subject = `✅ Issue Resolved at ${timeStr} - ${issueType}`;
+  
+  const hour = timestamp.getHours();
+  const isAfterHours = hour < 9 || hour > 17;
+  const isWeekend = [0, 6].includes(timestamp.getDay());
+  
+  if (isAfterHours && !isWeekend) {
+    subject = `🌙 Handled Overnight at ${timeStr} - ${issueType}`;
+  } else if (isWeekend) {
+    subject = `🦸 Weekend Issue Resolved - ${issueType}`;
+  }
+  
+  try {
+    // Send email
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: incidentCards.testMode ? incidentCards.testEmail : CONFIG.OWNER_EMAIL,
+      bcc: incidentCards.ownerBCC,
+      subject: subject,
+      html: cardHTML
+    };
+    
+    await emailTransporter.sendMail(mailOptions);
+    
+    // Store card in history
+    incidentCards.sent.push({
+      timestamp: new Date(),
+      issueType,
+      sentTo: mailOptions.to
+    });
+    
+    console.log(`📧 Incident card sent: ${issueType} to ${mailOptions.to}`);
+  } catch (error) {
+    console.error('❌ Error sending incident card:', error);
+  }
+}
+
 // ⏰ TIME-BASED ISSUE PATTERN TRACKING: Predictive operational intelligence
 const issuePatterns = {
   byHour: {}, // { "14": { cameraIssues: 3, gateIssues: 1 } }
@@ -4119,6 +4513,16 @@ RESPONSE RULES:
        // 🔧 TRACK SOP SUCCESS
        trackSOPCompletion(state.issue, true, false, false);
        
+       // 📧 SEND INCIDENT CARD TO CLIENT
+       await sendIncidentCard({
+         issueType: state.issue,
+         guardPhone,
+         resolutionTime,
+         timestamp: new Date(),
+         steps: state.completedSteps,
+         successful: true
+       });
+       
        await sendEmailReport(guardPhone, state.issue, true, state.completedSteps, state.conversationHistory || []);
        conversationState.delete(guardPhone);
        abandonmentAlertsSent.delete(guardPhone); // Clear alert flag
@@ -4247,15 +4651,139 @@ app.post('/sms', async (req, res) => {
 });
 
 // Health check
+// Test endpoint for incident cards
+app.get('/test-incident-card', async (req, res) => {
+  console.log('📧 Triggering test incident card...');
+  
+  // Generate test incident data
+  const now = new Date();
+  const testIncidentData = {
+    issueType: 'Camera System - NVR Connection',
+    guardPhone: '+19259221067',
+    resolutionTime: 480, // 8 minutes
+    timestamp: now,
+    steps: [
+      { step: 1, description: 'Checked power' },
+      { step: 2, description: 'Rebooted system' },
+      { step: 3, description: 'Verified cameras online' }
+    ],
+    successful: true
+  };
+  
+  try {
+    await sendIncidentCard(testIncidentData);
+    res.json({ 
+      success: true,
+      message: 'Test incident card sent!',
+      sentTo: incidentCards.testMode ? incidentCards.testEmail : CONFIG.OWNER_EMAIL,
+      bcc: incidentCards.ownerBCC,
+      timestamp: now,
+      cardType: 'current time'
+    });
+  } catch (error) {
+    console.error('Error sending test card:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+});
+
+// Test overnight card (3 AM scenario)
+app.get('/test-overnight-card', async (req, res) => {
+  console.log('📧 Triggering test OVERNIGHT incident card...');
+  
+  // Create timestamp for 3:14 AM
+  const overnightTime = new Date();
+  overnightTime.setHours(3, 14, 0, 0);
+  
+  const testIncidentData = {
+    issueType: 'Gate Malfunction - South Entrance',
+    guardPhone: '+19259221067',
+    resolutionTime: 660, // 11 minutes
+    timestamp: overnightTime,
+    steps: [
+      { step: 1, description: 'Manual reset' },
+      { step: 2, description: 'Lubrication' },
+      { step: 3, description: 'Tested 3x' }
+    ],
+    successful: true
+  };
+  
+  try {
+    await sendIncidentCard(testIncidentData);
+    res.json({ 
+      success: true,
+      message: 'Test OVERNIGHT incident card sent!',
+      sentTo: incidentCards.testMode ? incidentCards.testEmail : CONFIG.OWNER_EMAIL,
+      bcc: incidentCards.ownerBCC,
+      timestamp: overnightTime,
+      cardType: 'overnight (3:14 AM)'
+    });
+  } catch (error) {
+    console.error('Error sending test card:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+});
+
+// Test weekend card
+app.get('/test-weekend-card', async (req, res) => {
+  console.log('📧 Triggering test WEEKEND incident card...');
+  
+  // Create timestamp for Saturday 11:45 PM
+  const weekendTime = new Date();
+  const daysUntilSaturday = (6 - weekendTime.getDay() + 7) % 7;
+  weekendTime.setDate(weekendTime.getDate() + daysUntilSaturday);
+  weekendTime.setHours(23, 45, 0, 0);
+  
+  const testIncidentData = {
+    issueType: 'Camera Offline - Loading Dock',
+    guardPhone: '+19259221067',
+    resolutionTime: 240, // 4 minutes
+    timestamp: weekendTime,
+    steps: [
+      { step: 1, description: 'Power cycle' },
+      { step: 2, description: 'Verified connection' }
+    ],
+    successful: true
+  };
+  
+  try {
+    await sendIncidentCard(testIncidentData);
+    res.json({ 
+      success: true,
+      message: 'Test WEEKEND incident card sent!',
+      sentTo: incidentCards.testMode ? incidentCards.testEmail : CONFIG.OWNER_EMAIL,
+      bcc: incidentCards.ownerBCC,
+      timestamp: weekendTime,
+      cardType: 'weekend (Saturday 11:45 PM)'
+    });
+  } catch (error) {
+    console.error('Error sending test card:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+});
+
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'WatchTower is running!', 
-    version: '2.3-Abandonment',
+    version: '7.4-Comprehensive-Analytics + Incident Cards',
     activeConversations: conversationState.size,
     availableSOPs: ALL_SOPS.length,
     companyKnowledge: 'Loaded',
     aiMode: 'Cautious + Skip',
-    abandonmentDetection: '8 minutes'
+    abandonmentDetection: '8 minutes',
+    incidentCards: {
+      testMode: incidentCards.testMode,
+      testEmail: incidentCards.testEmail,
+      totalSent: incidentCards.sent.length
+    }
   });
 });
 
