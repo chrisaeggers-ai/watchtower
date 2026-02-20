@@ -1653,6 +1653,20 @@ const HANDOFF_QUESTIONS = [
   },
   {
     step: 6,
+    question: "🧹 Guard shack cleanliness - Please send a photo of the guard shack area right now. (Send photo, then reply 'Clean' or describe any issues)",
+    field: 'guardShackCleanliness',
+    requiresPhoto: true,
+    validation: (answer) => answer.length > 2
+  },
+  {
+    step: 7,
+    question: "🍽️ Break area cleanliness - Please send a photo showing: uniforms hung properly AND fridge/freezer clean. (Send photo, then reply 'Clean' or describe any issues)",
+    field: 'breakAreaCleanliness',
+    requiresPhoto: true,
+    validation: (answer) => answer.length > 2
+  },
+  {
+    step: 8,
     question: "📝 Anything the incoming guard needs to know? (Incidents, visitors, maintenance, or 'Nothing to report')",
     field: 'notes',
     validation: (answer) => answer.length > 2
@@ -1803,6 +1817,8 @@ async function sendConsolidatedHandoffReport() {
             <li>📱 Phone: ${handoff.data.phoneLocation}, ${handoff.data.phoneVolume} volume, ${handoff.data.phoneCharge} charge</li>
             <li>📹 Cameras: ${handoff.data.cameraStatus}</li>
             <li>🚪 Gate: ${handoff.data.gateStatus}</li>
+            <li>🧹 Guard Shack: ${handoff.data.guardShackCleanliness || 'Not reported'}${handoff.data.guardShackCleanliness_photo ? ` <a href="${handoff.data.guardShackCleanliness_photo}" target="_blank">[View Photo]</a>` : ''}</li>
+            <li>🍽️ Break Area: ${handoff.data.breakAreaCleanliness || 'Not reported'}${handoff.data.breakAreaCleanliness_photo ? ` <a href="${handoff.data.breakAreaCleanliness_photo}" target="_blank">[View Photo]</a>` : ''}</li>
             <li>📝 Notes: ${handoff.data.notes || 'None'}</li>
           </ul>
         `;
@@ -3750,7 +3766,7 @@ async function startHandoffProcess(guardPhone) {
 }
 
 // Handle responses during handoff process
-async function handleHandoffResponse(guardPhone, message, handoffState) {
+async function handleHandoffResponse(guardPhone, message, handoffState, photoUrls = []) {
   const messageLower = message.toLowerCase().trim();
   const words = messageLower.split(/\s+/); // Split into words for exact matching
   
@@ -3803,6 +3819,25 @@ async function handleHandoffResponse(guardPhone, message, handoffState) {
   // Process answer to current question
   const currentQuestion = HANDOFF_QUESTIONS[handoffState.step - 1];
   
+  // Check if this question requires a photo
+  if (currentQuestion.requiresPhoto) {
+    // Store photo URL if present
+    if (photoUrls && photoUrls.length > 0) {
+      handoffState.data[currentQuestion.field + '_photo'] = photoUrls[0];
+      console.log(`📷 Photo received for ${currentQuestion.field}: ${photoUrls[0]}`);
+      
+      // If they sent a photo but no text, remind them to describe
+      if (!message || message.trim().length < 3) {
+        await sendSMS(guardPhone, "Photo received! Now please describe the cleanliness status (e.g., 'Clean' or note any issues)");
+        return null;
+      }
+    } else if (!handoffState.data[currentQuestion.field + '_photo']) {
+      // No photo received yet for this question
+      await sendSMS(guardPhone, "Please send a photo first, then describe the cleanliness status.");
+      return null;
+    }
+  }
+  
   if (currentQuestion.validation(message)) {
     // Calculate time spent on this question
     const questionKey = `question${handoffState.step}`;
@@ -3831,6 +3866,15 @@ async function handleHandoffResponse(guardPhone, message, handoffState) {
         'Phone charge issue caught at handoff - prevented dead phone',
         COST_SAVINGS.handoffPhoneIssue
       );
+    }
+    
+    // Check for cleanliness issues
+    if (currentQuestion.field === 'guardShackCleanliness' && !message.toLowerCase().includes('clean')) {
+      console.log(`⚠️ Guard shack cleanliness issue reported: ${message}`);
+    }
+    
+    if (currentQuestion.field === 'breakAreaCleanliness' && !message.toLowerCase().includes('clean')) {
+      console.log(`⚠️ Break area cleanliness issue reported: ${message}`);
     }
     
     // Check for issues that need immediate attention
@@ -4040,6 +4084,14 @@ function detectHandoffIssues(handoffData) {
     issues.push(`Gate issue: ${handoffData.gateStatus}`);
   }
   
+  if (handoffData.guardShackCleanliness && !handoffData.guardShackCleanliness.toLowerCase().includes('clean')) {
+    issues.push(`Guard shack cleanliness issue: ${handoffData.guardShackCleanliness}`);
+  }
+  
+  if (handoffData.breakAreaCleanliness && !handoffData.breakAreaCleanliness.toLowerCase().includes('clean')) {
+    issues.push(`Break area cleanliness issue: ${handoffData.breakAreaCleanliness}`);
+  }
+  
   if (handoffData.notes && handoffData.notes.toLowerCase() !== 'none' && handoffData.notes.toLowerCase() !== 'nothing') {
     issues.push(`Note: ${handoffData.notes}`);
   }
@@ -4069,6 +4121,8 @@ async function sendIncomingGuardBriefing(guardPhone) {
     `📱 Duty Phone: ${recentHandoff.phoneLocation}, volume ${recentHandoff.phoneVolume}, ${recentHandoff.phoneCharge} charge\n` +
     `📹 Cameras: ${recentHandoff.cameraStatus.toUpperCase()}\n` +
     `🚪 Gate: ${recentHandoff.gateStatus.toUpperCase()}\n` +
+    `🧹 Guard Shack: ${recentHandoff.guardShackCleanliness || 'Not reported'}\n` +
+    `🍽️ Break Area: ${recentHandoff.breakAreaCleanliness || 'Not reported'}\n` +
     `📝 Notes: ${recentHandoff.notes}\n\n` +
     `Any questions? Text me anytime.`;
   
@@ -4175,7 +4229,7 @@ Reply with ONLY the equipment type.`;
 // MAIN CONVERSATION HANDLER
 // ==========================================
 
-async function handleConversation(guardPhone, message) {
+async function handleConversation(guardPhone, message, photoUrls = []) {
   // 🔔 UPDATE LAST CONTACT: Track when guard last messaged
   guardLastContact.set(guardPhone, Date.now());
   
@@ -4199,7 +4253,7 @@ async function handleConversation(guardPhone, message) {
   // 📋 CHECK IF IN HANDOFF PROCESS
   const handoffState = activeHandoffs.get(guardPhone);
   if (handoffState) {
-    await handleHandoffResponse(guardPhone, message, handoffState);
+    await handleHandoffResponse(guardPhone, message, handoffState, photoUrls);
     return null; // Handled via SMS
   }
   
@@ -4619,16 +4673,30 @@ RESPONSE RULES:
 app.post('/sms', async (req, res) => {
   const guardPhone = req.body.From.replace('whatsapp:', '');
   const message = req.body.Body;
+  const numMedia = parseInt(req.body.NumMedia) || 0;
+  
+  // Extract photo URLs if present
+  const photoUrls = [];
+  for (let i = 0; i < numMedia; i++) {
+    const mediaUrl = req.body[`MediaUrl${i}`];
+    if (mediaUrl) {
+      photoUrls.push(mediaUrl);
+    }
+  }
   
   // Improved logging - show full incoming message
   const fromDisplay = guardPhone.slice(-4);
   console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
   console.log(`📱 RECEIVED from ...${fromDisplay} (${message.length} chars):`);
   console.log(message);
+  if (photoUrls.length > 0) {
+    console.log(`📷 PHOTOS: ${photoUrls.length} attached`);
+    photoUrls.forEach((url, i) => console.log(`   Photo ${i+1}: ${url}`));
+  }
   console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
   
   try {
-    const response = await handleConversation(guardPhone, message);
+    const response = await handleConversation(guardPhone, message, photoUrls);
     
     if (response) {
       const twiml = new twilio.twiml.MessagingResponse();
