@@ -2937,9 +2937,31 @@ function isEscalationRequest(message) {
   return escalationPhrases.some(phrase => lowerMessage.includes(phrase));
 }
 
+// 🧪 TEST MODE: Phone numbers that simulate SMS without Twilio
+const TEST_PHONE_NUMBERS = [
+  '+2813308004',  // Simulator test number
+  '+15555555555', // Generic test number
+];
+
 // Send SMS/MMS (or WhatsApp)
 async function sendSMS(to, message, imageUrl = null) {
   try {
+    // 🧪 TEST MODE: Check if this is a test phone number
+    const isTestMode = TEST_PHONE_NUMBERS.includes(to);
+    
+    if (isTestMode) {
+      // Don't send via Twilio - just log what WOULD be sent
+      const msgType = imageUrl ? 'MMS' : CONFIG.WHATSAPP_MODE ? 'WhatsApp' : 'SMS';
+      const toDisplay = to.slice(-4);
+      console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+      console.log(`🧪 [TEST MODE] Would send ${msgType} to ...${toDisplay} (${message.length} chars):`);
+      console.log(message);
+      if (imageUrl) console.log(`📸 Image: ${imageUrl}`);
+      console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
+      return; // Exit - don't actually send via Twilio
+    }
+    
+    // NORMAL MODE: Send via Twilio
     const toNumber = CONFIG.WHATSAPP_MODE ? `whatsapp:${to}` : to;
     const fromNumber = CONFIG.WHATSAPP_MODE ? `whatsapp:${CONFIG.TWILIO_PHONE}` : CONFIG.TWILIO_PHONE;
     
@@ -4215,10 +4237,43 @@ Reply with ONLY the equipment type.`;
     const equipment = response.content[0].text.trim().toUpperCase();
     console.log(`🤖 AI detected equipment: ${equipment}`);
     
-    // Return appropriate SOP
-    if (equipment === 'CAMERA') return detectSOP("cameras down");
-    if (equipment === 'GATE') return detectSOP("gate stuck");
-    return detectSOP("general assistance");
+    // Try multiple trigger variations to ensure we match
+    let detected = null;
+    
+    if (equipment === 'CAMERA') {
+      // Try multiple camera-related triggers
+      detected = detectSOP("cameras down") || 
+                 detectSOP("camera offline") || 
+                 detectSOP("nvr down") ||
+                 detectSOP("camera not working") ||
+                 detectSOP("surveillance down");
+      
+      if (!detected) {
+        console.log(`⚠️ Camera SOP not found in knowledge base - using first camera SOP`);
+        // Fallback: use the first SOP (which is the camera SOP)
+        detected = { sop: ALL_SOPS[0], issue: 'Camera System Issue' };
+      }
+    } else if (equipment === 'GATE') {
+      // Try multiple gate-related triggers
+      detected = detectSOP("gate stuck") || 
+                 detectSOP("gate not opening") ||
+                 detectSOP("gate won't close") ||
+                 detectSOP("entrance broken");
+      
+      if (!detected) {
+        console.log(`⚠️ Gate SOP not found - using gate SOP from ALL_SOPS`);
+        // Find gate SOP in ALL_SOPS
+        const gateSOP = ALL_SOPS.find(sop => sop.title.toLowerCase().includes('gate'));
+        if (gateSOP) {
+          detected = { sop: gateSOP, issue: 'Gate System Issue' };
+        }
+      }
+    } else {
+      // General or unknown - try to detect any SOP
+      detected = detectSOP(message);
+    }
+    
+    return detected;
   } catch (error) {
     console.error('❌ AI equipment detection error:', error);
     return null; // Fallback to pattern matching
