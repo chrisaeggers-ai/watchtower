@@ -3273,18 +3273,34 @@ async function sendHandoffDiscrepancyAlert(outgoingGuard, incomingGuard, discrep
 
 // Smart "Cautious" Intent Analyzer with CONFIDENCE SCORING (MIT-level metacognition)
 async function analyzeGuardIntent(message, currentStepInfo, issueTitle) {
+  // 🎯 CONTEXT VALIDATION: Determine what equipment we're troubleshooting
+  const equipmentType = issueTitle.toLowerCase().includes('camera') || issueTitle.toLowerCase().includes('nvr') ? 'CAMERA' :
+                        issueTitle.toLowerCase().includes('gate') ? 'GATE' :
+                        issueTitle.toLowerCase().includes('fire') || issueTitle.toLowerCase().includes('panel') ? 'FIRE_PANEL' :
+                        issueTitle.toLowerCase().includes('fence') ? 'FENCE' :
+                        'UNKNOWN';
+  
   const systemPrompt = `
 You are a cautious security supervisor overseeing a troubleshooting procedure.
 
 CONTEXT:
 - Issue: "${issueTitle}"
+- Equipment Type: ${equipmentType}
 - Current Step: ${currentStepInfo.stepNumber} - "${currentStepInfo.instruction}"
 - User's Message: "${message}"
 
 YOUR GOAL:
 Classify the user's intent into exactly ONE of these categories:
 
-1. SOLVED: User explicitly states the *entire issue* is fixed (e.g., "Cameras are back up," "Alarm stopped," "System working").
+1. SOLVED: User explicitly states the *entire issue* is fixed AND mentions the CORRECT equipment type.
+   ${equipmentType === 'CAMERA' ? '✅ Valid: "cameras back up", "nvr working", "video feeds showing"' : ''}
+   ${equipmentType === 'CAMERA' ? '❌ Invalid: "gate working" (wrong equipment), "yes" (too vague)' : ''}
+   ${equipmentType === 'GATE' ? '✅ Valid: "gate working", "gate opening", "gate fixed"' : ''}
+   ${equipmentType === 'GATE' ? '❌ Invalid: "cameras back up" (wrong equipment), "yes" (too vague)' : ''}
+   ${equipmentType === 'FIRE_PANEL' ? '✅ Valid: "panel quiet", "alarm stopped", "fire panel normal"' : ''}
+   ${equipmentType === 'FIRE_PANEL' ? '❌ Invalid: "cameras working" (wrong equipment), "yes" (too vague)' : ''}
+   ${equipmentType === 'FENCE' ? '✅ Valid: "fence alarm clear", "fence normal", "perimeter secure"' : ''}
+   ${equipmentType === 'FENCE' ? '❌ Invalid: "gate working" (wrong equipment), "yes" (too vague)' : ''}
 
 2. NEXT: User confirmed they completed the *current step* only (e.g., "Done," "Plugged it in," "I'm there," "Ready").
 
@@ -3292,21 +3308,27 @@ Classify the user's intent into exactly ONE of these categories:
 
 4. ESCALATE: User is frustrated, angry, or explicitly asking for a human/supervisor.
 
-5. CLARIFY: User's response is vague (e.g., "It worked," "Good," "Okay," "It's on"). Unclear if they mean the *step* worked or the *whole system* is fixed.
+5. CLARIFY: User's response is vague OR mentions the WRONG equipment type.
+   Examples of CLARIFY:
+   - Vague: "It worked," "Good," "Okay," "It's on"
+   - Wrong equipment: User talks about CAMERAS during a GATE issue
+   - Wrong equipment: User talks about GATE during a CAMERA issue
+   - Too generic: "yes", "fixed", "working" (without mentioning specific equipment)
 
 6. SKIP: User indicates they are already past the current step (e.g., "I'm already in the room," "I'm looking at the monitor," "Skip to X").
 
 CRITICAL RULES:
+- 🎯 EQUIPMENT VALIDATION: If user mentions the WRONG equipment type, return CLARIFY (not SOLVED)
 - Be Conservative: If user says "It worked" or "Good", return CLARIFY
-- Only return SOLVED if they explicitly mention the original problem being fixed
+- Only return SOLVED if they explicitly mention the CORRECT equipment being fixed
 - Return SKIP only if they clearly indicate being past the current step
 
 CONFIDENCE SCORING:
 After determining the category, rate your confidence (0-100):
-- 90-100: Extremely clear intent (e.g., "done", "cameras are back up")
+- 90-100: Extremely clear intent with correct equipment mentioned
 - 70-89: Pretty confident (clear but could have edge cases)
 - 50-69: Unsure (vague message, multiple interpretations)
-- 0-49: Very uncertain (ambiguous, contradictory)
+- 0-49: Very uncertain (wrong equipment mentioned, ambiguous, contradictory)
 
 Reply in this EXACT format:
 CATEGORY CONFIDENCE
@@ -4642,8 +4664,39 @@ RESPONSE RULES:
 
     // CASE 2: CLARIFY (The Conservative Check) ⚠️
     if (intent === 'CLARIFY') {
+        // 🎯 SMART CLARIFICATION: Check if guard mentioned wrong equipment
+        const guardMentionedCamera = message.toLowerCase().includes('camera') || message.toLowerCase().includes('nvr') || message.toLowerCase().includes('feed');
+        const guardMentionedGate = message.toLowerCase().includes('gate');
+        const guardMentionedFire = message.toLowerCase().includes('fire') || message.toLowerCase().includes('panel') || message.toLowerCase().includes('alarm');
+        const guardMentionedFence = message.toLowerCase().includes('fence') || message.toLowerCase().includes('perimeter');
+        
+        const isGateIssue = state.issue.toLowerCase().includes('gate');
+        const isCameraIssue = state.issue.toLowerCase().includes('camera') || state.issue.toLowerCase().includes('nvr');
+        const isFireIssue = state.issue.toLowerCase().includes('fire') || state.issue.toLowerCase().includes('panel');
+        const isFenceIssue = state.issue.toLowerCase().includes('fence');
+        
+        let clarificationMessage;
+        
+        // Detect wrong equipment mention
+        if ((isGateIssue && guardMentionedCamera) || 
+            (isCameraIssue && guardMentionedGate) ||
+            (isFireIssue && (guardMentionedCamera || guardMentionedGate)) ||
+            (isFenceIssue && (guardMentionedCamera || guardMentionedGate))) {
+          
+          // Guard mentioned WRONG equipment
+          const correctEquipment = isGateIssue ? 'GATE' :
+                                  isCameraIssue ? 'CAMERAS' :
+                                  isFireIssue ? 'FIRE PANEL' :
+                                  isFenceIssue ? 'FENCE' : 'equipment';
+          
+          clarificationMessage = `Wait - we're troubleshooting the ${correctEquipment}.\n\nIs the ${correctEquipment} working now? (Yes/No)`;
+        } else {
+          // Generic vague response
+          clarificationMessage = "Just to be sure: did that fix the WHOLE problem, or are you just ready for the next step?\n\n(Text 'Fixed' if done, or 'Next' to continue)";
+        }
+        
         conversationState.set(guardPhone, state);
-        await sendSMS(guardPhone, "Just to be sure: did that fix the WHOLE problem, or are you just ready for the next step?\n\n(Text 'Fixed' if done, or 'Next' to continue)");
+        await sendSMS(guardPhone, clarificationMessage);
         return null;
     }
 
