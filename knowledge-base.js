@@ -8,55 +8,131 @@
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const FRUITVALE_NVR_SOP = {
-  title: "Camera System Troubleshooting",
+  title: "Fruitvale NVR/DW Camera System Troubleshooting",
   site: "Fruitvale",
   steps: [
     {
       stepNumber: 1,
-      instruction: "Check if the NVR (Network Video Recorder) has power.",
-      userFriendly: "🔧 Let's troubleshoot the cameras.\n\n**Step 1:** Check if the NVR has power. Look for:\n- Power light on front\n- Fans running (listen)\n- Display showing video\n\nIs the NVR powered on? (Yes/No)",
-      waitForConfirmation: true
+      instruction: "Go to the IT room door next to the fire alarm panel.",
+      userFriendly: "Head to the IT room - it's the door right next to the fire alarm panel. Text 'done' when you're there.",
+      waitForConfirmation: true,
+      image: "step1.jpg"
     },
     {
       stepNumber: 2,
-      instruction: "Check if you can see video on the monitor connected to the NVR.",
-      userFriendly: "Good! **Step 2:** Check if you can see any video on the monitor.\n\nCan you see video feeds? (Yes/No)",
-      waitForConfirmation: true
+      instruction: "Enter code 1078 on the padlock to unlock the door.",
+      userFriendly: "Enter 1078 on the padlock. Text 'done' when you're in.",
+      waitForConfirmation: true,
+      image: "step2.jpg"
     },
     {
       stepNumber: 3,
-      instruction: "Reboot the NVR system by unplugging power, waiting 30 seconds, and plugging back in.",
-      userFriendly: "**Step 3:** Let's reboot the system.\n\n1. Unplug the power cable from the NVR\n2. Wait 30 seconds\n3. Plug it back in\n4. Wait 2-3 minutes for it to boot\n\nDone rebooting? (Reply 'Done' when ready)",
-      waitForConfirmation: true
+      instruction: "Disconnect HDMI cable (1) from NVR and connect HDMI cable (2) to bring up NVR display on small monitor in IT room.",
+      userFriendly: "Find the 2 HDMI cables. Disconnect cable 1, plug in cable 2. This shows the display on the small monitor. Done?",
+      waitForConfirmation: true,
+      image: "step3.jpg"
     },
     {
       stepNumber: 4,
-      instruction: "Check if cameras are back online after reboot.",
-      userFriendly: "**Final Check:** Can you see the camera feeds now?\n\nWorking? (Yes/No)",
+      instruction: "Connect the mouse and keyboard cables to the USB ports on the NVR.",
+      userFriendly: "Plug the mouse and keyboard into the USB ports on the NVR. Ready?",
       waitForConfirmation: true,
-      isResolutionCheck: true
+      image: "step4.jpg"
+    },
+    {
+      stepNumber: 5,
+      instruction: "Click on 'DW' on the left side of the screen.",
+      userFriendly: "Click 'DW' on the left side of the screen. Let me know when you've done that.",
+      waitForConfirmation: true,
+      image: "step5.jpg"
+    },
+    {
+      stepNumber: 6,
+      instruction: "Click on 'OiFunds Fruitvale' to connect to the server.",
+      userFriendly: "Click 'OiFunds Fruitvale' to connect. Text me once it connects.",
+      waitForConfirmation: false
+    },
+    {
+      stepNumber: 7,
+      instruction: "If server doesn't accept 'OiFunds', use manual connection: Click 'Connect to Server', enter User: admin, Password: admin12345, click OK.",
+      userFriendly: "If it doesn't connect:\n\n1. Click 'Connect to Server'\n2. Username: admin\n3. Password: admin12345\n4. Click OK\n\nConnected?",
+      waitForConfirmation: true,
+      image: "step7.jpg"
+    },
+    {
+      stepNumber: 8,
+      instruction: "If cameras don't automatically show up, click dropdown arrow next to 'New Layout 1' and select 'Guard View'.",
+      userFriendly: "If cameras aren't showing, click the dropdown next to 'New Layout 1' and select 'Guard View'. See them now?",
+      waitForConfirmation: true,
+      image: "step8.jpg"
+    },
+    {
+      stepNumber: 9,
+      instruction: "Alternative: Click side arrow on left to open camera panel, scroll to 'Guard View' and double-click it.",
+      userFriendly: "Still nothing? Click the side arrow on the left, scroll to 'Guard View' and double-click it. Cameras up?",
+      waitForConfirmation: false
+    },
+    {
+      stepNumber: 10,
+      instruction: "IMPORTANT: Disconnect HDMI cable and mouse/keyboard, then reconnect the original HDMI cable to make cameras show on guard shack TV.",
+      userFriendly: "Last step: Unplug the HDMI and mouse/keyboard. Reconnect the original HDMI cable so cameras show back up on the TV. IMPORTANT - don't skip this! Done?",
+      waitForConfirmation: true,
+      image: "step10.jpg"
     }
   ],
   
   triggerPhrases: [
-    // General camera down
-    "cameras are down", "cameras down", "cameras not working", "camera system down",
-    "cameras went down", "cameras went out", "can't see cameras", "cant see cameras",
-    "no camera feed", "camera feed is out", "cameras offline", "camera system offline",
-    "cameras stopped working", "camera display blank", "monitor is black",
-    
-    // NVR specific
-    "nvr is down", "nvr not working", "nvr offline", "nvr says offline",
-    "video system down", "surveillance down", "security cameras down",
-    
-    // Specific camera issues
-    "camera 3 not working", "camera not working", "one camera down", "some cameras down",
-    "cameras fuzzy", "cameras are fuzzy", "can't see anything", "cant see anything",
-    "cameras black", "cameras went black", "screen went black",
-    
-    // Display issues
-    "monitor shows nothing", "no video", "no picture", "blank screen",
-    "display is blank", "nothing on monitor", "tv shows no cameras"
+    // 150 COMPREHENSIVE CAMERA/NVR TRIGGERS
+    "cameras are down", "cameras aren't working", "cameras not working", "camera system is down",
+    "the cameras went down", "cameras went out", "i can't see the cameras", "cant see cameras",
+    "no camera feed", "camera feed is out", "cameras are offline", "camera system offline",
+    "lost camera signal", "cameras stopped working", "camera display is blank", "monitor is black",
+    "no picture on cameras", "cameras showing nothing", "camera screen is blank", "nvr is down",
+    "nvr not working", "nvr system down", "video system down", "surveillance system down",
+    "security cameras down", "cctv down", "cctv not working", "cctv system offline",
+    "video feed is out", "lost video feed", "can't access cameras", "cant access cameras",
+    "camera system crashed", "cameras froze", "camera feed froze", "monitor froze",
+    "no video signal", "video signal lost", "cameras went black", "screen went black",
+    "all cameras are out", "some cameras are down", "half the cameras are out",
+    "cameras aren't showing", "cant pull up cameras", "camera system won't load", "wont load",
+    "nvr won't connect", "cant connect to nvr", "lost connection to cameras",
+    "camera connection lost", "dvr isn't working", "dvr is down", "recording system down",
+    "video recorder down", "cameras aren't recording", "system isn't recording",
+    "how do i fix the cameras", "how do i get cameras back", "how do i restore camera feed",
+    "what do i do when cameras are down", "cameras need reset", "how do i reset cameras",
+    "how do i restart the nvr", "need to reboot cameras", "camera reboot needed",
+    "system needs restart", "how do i bring cameras back up", "how do i get video back",
+    "cameras are black screen", "nothing on the monitor", "monitor shows no signal",
+    "tv shows no cameras", "guard shack tv is blank", "cant see anything on screen",
+    "display is blank", "no image on cameras", "camera image is gone", "lost all camera views",
+    "view screens are blank", "surveillance is down", "security feed is out",
+    "camera monitors are dark", "the nvr isn't responding", "nvr isnt responding",
+    "nvr is frozen", "system is frozen", "camera software crashed", "dw system is down",
+    "digital watchdog down", "camera server is down", "cant access camera server",
+    "server won't connect", "server wont connect", "cameras need troubleshooting",
+    "camera troubleshooting needed", "video system needs fix", "fix the camera system",
+    "cameras require attention", "camera system failure", "system failure cameras",
+    "total camera loss", "complete camera outage", "no visual on cameras", "visual feed lost",
+    "cant monitor cameras", "monitoring system down", "camera grid is blank", "all views are blank",
+    "multi-view is blank", "multi view is blank", "camera layout is blank",
+    "guard view is blank", "cant see guard view", "layout won't load", "layout wont load",
+    "views won't display", "views wont display", "camera channels are out", "all channels down",
+    "channels aren't showing", "channels arent showing", "cant switch camera views",
+    "views aren't changing", "stuck on one camera", "cameras won't cycle", "cameras wont cycle",
+    "camera rotation stopped", "cameras are glitching", "camera feed is glitchy",
+    "video is pixelated", "cameras are fuzzy", "blurry camera feed", "cameras are lagging",
+    "video lag issue", "camera delay problem", "live feed isn't working", "live feed isnt working",
+    "cant get live view", "real-time view is down", "cameras are static", "getting static on cameras",
+    "snow on camera screens", "blue screen on cameras", "error message on cameras",
+    "camera error display", "system error cameras", "cameras show error",
+    "camera malfunction alert", "alert cameras are down", "warning camera system",
+    "cameras just went out", "cameras suddenly stopped", "video just cut out",
+    "lost cameras just now", "cameras went down suddenly", "immediate camera loss",
+    "cameras failed just now", "just lost all cameras", "camera system just failed",
+    // Shortened/casual
+    "cams down", "cameras out", "nvr down", "no cameras", "cam feed out", "system down cameras",
+    // Additional variations
+    "camera 3 not working", "camera 3", "one camera down", "some cameras down"
   ]
 };
 
